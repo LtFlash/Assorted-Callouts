@@ -1,42 +1,55 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Rage;
-using LSPD_First_Response.Mod.API;
-using AssortedCallouts.Extensions;
-using LSPD_First_Response.Mod.Callouts;
-using System.IO;
-using Rage.Native;
-using System.Drawing;
-using System.Windows.Forms;
-using RAGENativeUI.Elements;
+﻿//TODO: 
+// - make sure all spawning f() assign entity.Instance field
+
 using Albo1125.Common.CommonLibrary;
+using AssortedCallouts.Extensions;
+using LSPD_First_Response.Mod.API;
+using LSPD_First_Response.Mod.Callouts;
+using Rage;
+using Rage.Native;
+using RAGENativeUI.Elements;
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Linq;
+using System.Windows.Forms;
+using ExtensionMethods = Albo1125.Common.CommonLibrary.ExtensionMethods;
 
 namespace AssortedCallouts.Callouts
 {
     [CalloutInfo("Bank Heist", CalloutProbability.Low)]
-    internal class BankHeist : AssortedCallout
+    internal partial class BankHeist : AssortedCallout
     {
+        private Vector3 PlayerPosition => Game.LocalPlayer.Character.Position;
+        private Ped Player => Game.LocalPlayer.Character;
+        private float DistToPlayer(Vector3 pos) => Vector3.Distance(PlayerPosition, pos);
+        private void DeleteEntity(Entity e) { if (e.Exists()) e.Delete(); }
+
         private Vector3 PacificBank = new Vector3(231.5777f, 215.1532f, 106.2815f);
         private const ulong _DOOR_CONTROL = 0x9b12f9a24fabedb0;
-        private List<Ped> Robbers = new List<Ped>();
 
+        private List<Ped> Robbers = new List<Ped>();
         private bool fighting = false;
+        private int RobbersKilled = 0;
+
         private bool CalloutRunning = false;
+
+        //AUDIO
         private System.Media.SoundPlayer AlarmPlayer = new System.Media.SoundPlayer("LSPDFR/Police Scanner/Assorted Callouts Audio/ALARM_BELL.wav");
         private bool AudioStateChanged = false;
-
         private bool AlarmPlaying = false;
+        private enum AudioState { Alarm, None };
+        private AudioState CurrentAudioState = AudioState.None;
+        private const float DIST_PLAY_BANK_ALARM_ON = 55f;
+        private const float DIST_PLAY_BANK_ALARM_OFF = 70f;
 
         private bool TalkedToWells = false;
         private bool HandlingRespawn = false;
+        //NOTE: var stays unchanged
         private bool EvaluatedWithWells = false;
+
         private int TimesDied = 0;
         private int FightingPacksUsed = 0;
-        private int RobbersKilled = 0;
-        private AudioState CurrentAudioState = AudioState.None;
         private bool DoneFighting = false;
         private Blip SideDoorBlip;
         private bool TalkedToWells2nd = false;
@@ -45,49 +58,29 @@ namespace AssortedCallouts.Callouts
         private bool SWATFollowing = false;
         private int SWATUnitsdied = 0;
 
-
         private bool FightingPrepared = false;
-
         private bool SurrenderComplete = false;
 
-        private Vector3[] PacificBankDoors = new Vector3[] { new Vector3(229.7984f, 214.4494f, 105.5554f), new Vector3(258.3625f, 200.4897f, 104.9758f) };
-        private Vector3[] PacificBankInsideChecks = new Vector3[] { new Vector3(235.9762f, 220.6012f, 106.2868f), new Vector3(238.3628f, 214.8286f, 106.2868f), new Vector3(261.084f, 208.12f, 106.2832f), new Vector3(235.2972f, 217.1385f, 106.2867f) };
-        private Vector3[] PacificBankDoorsInside = new Vector3[] { new Vector3(259.5908f, 204.1841f, 106.2832f), new Vector3(232.4167f, 215.6826f, 106.2866f) };
-
-        private Vector3 InsideBankVault = new Vector3(252.3106f, 222.5586f, 101.6834f);
-        private Vector3 OutsideBankVault = new Vector3(257.3354f, 225.5874f, 101.8757f);
+        
 
         private Vector3 HostageSafeLocation = new Vector3(241.8676f, 176.3772f, 105.1341f);
         private float HostageSafeHeading = 158.8192f;
-        //Police Barriers
-        private List<Ped> BarrierPeds = new List<Ped>();
-        private List<Rage.Object> InvisWalls = new List<Rage.Object>();
-        private List<Rage.Object> Barriers = new List<Rage.Object>();
-        private List<Vector3> BarrierLocations = new List<Vector3>() { new Vector3(215.393f, 203.157f, 104.454f), new Vector3(215.1232f, 205.6814f, 104.4652f), new Vector3(218.4388f, 196.256f, 104.5912f), new Vector3(233.0477f, 191.5893f, 104.3578f),
-        new Vector3(235.1332f, 191.1562f, 104.3189f), new Vector3(237.6775f, 190.3424f, 104.2726f), new Vector3(247.1391f, 188.03f, 104.0998f), new Vector3(244.9249f, 187.9552f, 104.1492f), new Vector3(218.238f, 213.5867f, 104.4652f), new Vector3(218.7885f, 216.0675f, 104.4652f), new Vector3(219.6092f, 218.8511f, 104.4652f) };
-        private List<float> BarrierHeadings = new List<float>() { 286.3633f, 290.2363f, 344.4589f, 346.3031f, 341.4462f, 342.168f, 25.01121f, 1.558372f, 255.0954f, 255.0954f, 267.3944f };
-
-        //Police Vehicles
-        private List<Vector3> POLICECarLocations = new List<Vector3>() { new Vector3(222.4914f, 196.139f, 105.2151f), new Vector3(228.7804f, 193.9648f, 105.0773f), new Vector3(250.7617f, 190.7597f, 104.5666f) };
-        private List<float> POLICECarHeadings = new List<float>() { 251.93f, 70.06104f, 291.0875f };
-        private List<Vehicle> AllSpawnedPoliceVehicles = new List<Vehicle>();
-
-        private List<Vector3> POLICE2CarLocations = new List<Vector3>() { new Vector3(216.4797f, 199.8008f, 105.1088f), new Vector3(216.3862f, 209.5035f, 105.1084f) };
-        private List<float> POLICE2CarHeadings = new List<float>() { 11.46685f, 339.02f };
-
-        private List<Vector3> POLICE3CarLocations = new List<Vector3>() { new Vector3(241.5773f, 190.1744f, 104.9979f), new Vector3(223.8036f, 221.5969f, 105.2692f) };
-        private List<float> POLICE3CarHeadings = new List<float>() { 246.1062f, 305.6254f };
-
-        //Police Officers
-        private static string[] LSPDModels = new string[] { "s_m_y_cop_01", "S_F_Y_COP_01" };
 
         private List<Vector3> PoliceOfficersStandingLocations = new List<Vector3>() { new Vector3(215.3605f, 199.1968f, 105.542f), new Vector3(214.3272f, 203.5561f, 105.4791f), new Vector3(239.7187f, 189.4415f, 105.2328f), new Vector3(217.9366f, 215.7689f, 105.5233f) };
         private List<float> PoliceOfficersStandingHeadings = new List<float>() { 116.6588f, 121.1613f, 154.7706f, 66.40781f };
         private List<Ped> PoliceOfficersStandingSpawned = new List<Ped>();
 
+        private List<EntityData<Ped>> OfficersStanding = new List<EntityData<Ped>>();
+
+
+
+
         private List<Vector3> PoliceOfficersAimingLocations = new List<Vector3>() { new Vector3(215.3038f, 210.3652f, 105.5509f), new Vector3(229.6182f, 192.2897f, 105.4265f), new Vector3(223.2215f, 194.5566f, 105.5815f), new Vector3(242.2608f, 188.373f, 105.1962f), new Vector3(252.175f, 189.5349f, 104.8857f), new Vector3(221.073f, 221.157f, 105.4611f) };
         private List<float> PoliceOfficersAimingHeadings = new List<float>() { 284.9829f, 352.2892f, 338.3747f, 302.2641f, 333.9143f, 237.1773f };
         private List<Ped> PoliceOfficersAimingSpawned = new List<Ped>();
+
+        private List<EntityData<Ped>> OfficersAiming = new List<EntityData<Ped>>();
+
 
         private List<Ped> PoliceOfficersArresting = new List<Ped>();
 
@@ -95,49 +88,19 @@ namespace AssortedCallouts.Callouts
         private List<Ped> PoliceOfficersTargetsToShoot = new List<Ped>();
 
         //Swat teams
+        //private List<Ped> SWATTeam1 = new List<Ped>();
         private List<Vector3> SWATTeam1Locations = new List<Vector3>() { new Vector3(260.5645f, 200.5741f, 104.9401f), new Vector3(262.1003f, 200.0121f, 104.9125f), new Vector3(256.6042f, 202.0044f, 105.0125f), new Vector3(255.1498f, 202.5428f, 105.0388f), new Vector3(253.9746f, 203.0882f, 105.0599f), new Vector3(263.3704f, 199.6684f, 104.8904f) };
         private List<float> SWATTeam1Headings = new List<float>() { 71.64834f, 68.8295f, 251.649f, 248.7861f, 248.8271f, 68.8268f };
+
+        //private List<Ped> SWATTeam2 = new List<Ped>();
         private List<Vector3> SWATTeam2Locations = new List<Vector3>() { new Vector3(230.4205f, 222.8963f, 105.5488f), new Vector3(229.3888f, 219.9169f, 105.5496f), new Vector3(230.0146f, 221.7818f, 105.549f), new Vector3(234.2444f, 210.1959f, 105.4067f), new Vector3(235.6489f, 209.7039f, 105.3825f), new Vector3(236.8931f, 209.2961f, 105.3615f) };
         private List<float> SWATTeam2Headings = new List<float>() { 159.7311f, 159.7311f, 159.7311f, 68.82679f, 68.82679f, 68.82679f };
 
-        private List<Ped> SWATTeam1 = new List<Ped>();
-        private List<Ped> SWATTeam2 = new List<Ped>();
-        private string[] SWATWeapons = new string[] { "WEAPON_CARBINERIFLE", "WEAPON_ASSAULTSMG" };
-        private List<Ped> SWATUnitsSpawned = new List<Ped>();
+        private List<EntityData<Ped>> SWATOperators = new List<EntityData<Ped>>();
 
-        private string[] Grenades = new string[] { "WEAPON_GRENADE", "WEAPON_SMOKEGRENADE" };
-
-        //Hostages
-        private List<Vector3> HostagesLocations = new List<Vector3>() { new Vector3(253.4743f, 217.7294f, 106.2868f), new Vector3(240.2256f, 223.8581f, 106.2869f), new Vector3(247.4731f, 215.7981f, 106.2869f), new Vector3(235.0374f, 218.5802f, 110.2827f), new Vector3(243.3186f, 210.8154f, 110.283f), new Vector3(265.409f, 214.4903f, 110.2873f), new Vector3(256.4999f, 225.638f, 106.2868f), new Vector3(257.9439f, 227.4617f, 101.6833f) };
-        private List<float> HostagesHeadings = new List<float>() { 26.3351f, 333.7643f, 308.5362f, 183.8941f, 69.50799f, 250.7003f, 344.9573f, 66.61107f };
-        private List<Ped> SpawnedHostages = new List<Ped>();
-        private string[] HostageModels = new string[] { "A_F_M_BUSINESS_02", "A_M_M_BUSINESS_01", "A_F_Y_FEMALEAGENT", "A_M_Y_BUSINESS_03" };
-        private List<Ped> RescuedHostages = new List<Ped>();
-        private List<Ped> SafeHostages = new List<Ped>();
-        private List<Ped> AllHostages = new List<Ped>();
         private int AliveHostagesCount = 0;
         private int SafeHostagesCount = 0;
         private int TotalHostagesCount = 0;
-
-
-        //RIOT vans
-        private List<Vector3> RiotLocations = new List<Vector3>() { new Vector3(224.1989f, 207.5056f, 105.1199f), new Vector3(263.7726f, 193.397f, 104.4452f) };
-        private List<float> RiotHeadings = new List<float>() { 193.6453f, 214.4147f };
-        private List<Vehicle> RiotVans = new List<Vehicle>();
-
-        //Robbers
-        private List<Vector3> RobbersNegotiationLocations = new List<Vector3>() { new Vector3(235.2906f, 217.1142f, 106.2867f), new Vector3(254.4529f, 217.6757f, 106.2868f), new Vector3(243.2524f, 222.3944f, 106.2868f), new Vector3(257.5506f, 223.6651f, 106.2863f), new Vector3(242.9586f, 213.7329f, 110.283f),
-        new Vector3(261.4425f, 223.766f, 101.6833f) ,new Vector3(266.9025f, 219.2729f, 104.8833f) };
-        private List<float> RobbersNegotiationHeadings = new List<float>() { 109.0629f, 230.5565f, 78.30953f, 139.71f, 333.9886f, 246.4011f, 93.847f, };
-
-        private List<Vector3> RobbersSneakyLocations = new List<Vector3>() { new Vector3(235.5733f, 228.3068f, 110.2827f), new Vector3(256.7757f, 205.0848f, 110.283f), new Vector3(265.3547f, 222.4385f, 101.6833f), new Vector3(263.0323f, 215.4664f, 110.2877f), new Vector3(255.1933f, 222.045f, 106.2869f), new Vector3(238.6139f, 228.2485f, 106.2834f), new Vector3(238.6164f, 227.2258f, 110.2827f), new Vector3(261.3226f, 210.6962f, 110.2877f), new Vector3(265.8036f, 215.6155f, 110.283f) };
-        private List<float> RobbersSneakyHeadings = new List<float>() { 248.8268f, 339.1755f, 153.5341f, 159.1769f, 341.1396f, 69.37666f, 68.82679f, 166.2358f, 334.0478f };
-        private List<Ped> RobbersSneakySpawned = new List<Ped>();
-        private string[] RobbersSneakyWeapons = new string[] { "WEAPON_PISTOL50", "WEAPON_KNIFE", "WEAPON_ASSAULTSMG", "WEAPON_ASSAULTSHOTGUN", "WEAPON_CROWBAR", "WEAPON_HAMMER", "WEAPON_ASSAULTRIFLE" };
-
-        private List<Vector3> RobbersVaultLocations = new List<Vector3>() { new Vector3(253.9261f, 221.6735f, 101.6834f), new Vector3(252.686f, 221.9205f, 101.6834f), new Vector3(251.4069f, 222.5131f, 101.6834f) };
-        private List<float> RobbersVaultHeadings = new List<float>() { 353.9462f, 343.3658f, 335.4267f };
-        private List<Ped> RobbersVault = new List<Ped>();
 
         private Vector3 MiniGunRobberLocation = new Vector3(267.0747f, 224.5822f, 110.2829f);
         private Vector3 MiniGunFireLocation = new Vector3(257.7627f, 223.3801f, 106.2863f);
@@ -163,34 +126,655 @@ namespace AssortedCallouts.Callouts
         private List<Vector3> RobbersSurrenderLocations = new List<Vector3>() { new Vector3(230.8764f, 207.1935f, 105.4408f), new Vector3(233.9847f, 206.0195f, 105.3878f), new Vector3(237.1756f, 205.175f, 105.3347f), new Vector3(239.5613f, 203.8999f, 105.2908f), new Vector3(242.2058f, 203.3801f, 105.2473f), new Vector3(245.231f, 201.896f, 105.1919f), new Vector3(248.4907f, 201.2163f, 105.1362f) };
         private List<float> RobbersSurrenderHeadings = new List<float>() { 146.3448f, 148.8101f, 152.9936f, 175.8113f, 170.111f, 151.4013f, 138.7258f };
 
-
-
-        private string[] RobbersWeapons = new string[] { "WEAPON_SAWNOFFSHOTGUN", "WEAPON_ASSAULTRIFLE", "WEAPON_PUMPSHOTGUN", "WEAPON_ASSAULTSHOTGUN", "WEAPON_ADVANCEDRIFLE" };
-
         //Captain Wells
         private Ped CaptainWells;
         private Blip CaptainWellsBlip;
         private Vector3 CaptainWellsLocation = new Vector3(261.6116f, 192.8469f, 104.8786f);
         private float CaptainWellsHeading = 49.73652f;
+        
+        //TODO:
+        // - use to delete all entities in End()
+        private readonly List<Entity> AllBankHeistEntities = new List<Entity>();
 
-        //EMS &Fire
-        private List<Vector3> AmbulanceLocations = new List<Vector3>() { new Vector3(260.8994f, 166.494f, 104.5317f), new Vector3(239.1898f, 172.3954f, 104.8571f) };
-        private List<float> AmbulanceHeadings = new List<float>() { 199.5887f, 158.5571f };
-        private List<Vehicle> AmbulancesList = new List<Vehicle>();
+        public override bool OnBeforeCalloutDisplayed()
+        {
+            SpawnPoint = PacificBank;
 
-        private List<Vector3> ParamedicLocations = new List<Vector3>() { new Vector3(242.0103f, 174.1728f, 105.1191f), new Vector3(243.9722f, 170.8235f, 105.0307f) };
-        private List<float> ParamedicHeadings = new List<float>() { 330.9329f, 341.8453f };
-        private List<Ped> ParamedicsList = new List<Ped>();
+            float dist = Vector3.Distance(SpawnPoint, PlayerPosition);
 
-        private List<Vector3> FireTruckLocations = new List<Vector3>() { new Vector3(246.3588f, 167.8176f, 104.9527f) };
-        private List<float> FireTruckHeadings = new List<float>() { 249.4772f };
-        private List<Vehicle> FireTrucksList = new List<Vehicle>();
+            if (dist < 90f || dist > 2800f)
+            {
+                return false;
+            }
 
-        private List<Ped> FiremenList = new List<Ped>();
+            ShowCalloutAreaBlipBeforeAccepting(SpawnPoint, 15f);
+            CalloutPosition = SpawnPoint;
+            CalloutMessage = "Pacific Bank Heist";
 
-        //All callout entities
-        private List<Entity> AllBankHeistEntities = new List<Entity>();
+            ComputerPlusRunning = AssortedCalloutsHandler.IsLSPDFRPluginRunning("ComputerPlus", new Version("1.3.0.0"));
+            if (ComputerPlusRunning)
+            {
+                CalloutID = API.ComputerPlusFuncs.CreateCallout("Pacific Bank Heist", "Bank Heist", SpawnPoint, 1, "Reports of a major bank heist at the Pacific Bank. Multiple emergency services on scene. Respond as a tactical commander.",
+                1, null, null);
+            }
+            Functions.PlayScannerAudioUsingPosition("DISP_ATTENTION_UNIT " + AssortedCalloutsHandler.DivisionUnitBeatAudioString + " WE_HAVE CRIME_BANKHEIST IN_OR_ON_POSITION ", SpawnPoint);
+            return base.OnBeforeCalloutDisplayed();
+        }
 
+        public override bool OnCalloutAccepted()
+        {
+            AlarmPlayer.Load();
+
+            if (Player.IsInAnyVehicle(false))
+            {
+                AllBankHeistEntities.Add(Player.CurrentVehicle);
+            }
+
+            CalloutHandler();
+
+            return base.OnCalloutAccepted();
+        }
+        
+        public override void Process()
+        {
+            base.Process();
+
+            proc.Process();
+
+            if (CalloutRunning)
+            {
+                if (!HandlingRespawn && Player.IsDead)
+                {
+                    HandleCustomRespawn();
+                }
+            }
+        }
+        //STATUS: old f()
+        [Obsolete]
+        private void CalloutHandler()
+        {
+            CalloutRunning = true;
+
+            GameFiber.StartNew(delegate
+            {
+                try
+                {
+                    SuspectBlip = new Blip(PacificBank);
+                    SuspectBlip.IsRouteEnabled = true;
+
+                    SideDoorBlip = new Blip(new Vector3(258.3625f, 200.4897f, 104.9758f));
+
+                    GameFiber.StartNew(delegate
+                    {
+                        GameFiber.Wait(4800);
+                        Game.DisplayNotification("Copy that, responding ~b~CODE 3 ~s~to the ~b~Pacific Bank~s~, over.");
+                        Functions.PlayScannerAudio("COPY_THAT_MOVING_RIGHT_NOW REPORT_RESPONSE_COPY PROCEED_WITH_CAUTION_ASSORTED");
+                        GameFiber.Wait(3400);
+                        Game.DisplayNotification("Roger that, ~r~proceed with caution!");
+                    });
+
+                    LoadModels();
+
+                    while (Vector3.Distance(PlayerPosition, SpawnPoint) > 350f)
+                    {
+                        GameFiber.Yield();
+                    }
+
+                    if (Player.IsInAnyVehicle(false))
+                    {
+                        AllBankHeistEntities.Add(Player.CurrentVehicle);
+
+                        Ped[] passengers = Game.LocalPlayer.Character.CurrentVehicle.Passengers;
+                        Array.ForEach(passengers, p => AllBankHeistEntities.Add(p));
+                    }
+
+                    GameFiber.Yield();
+
+                    CreateSpeedZone();
+
+                    ClearUnrelatedEntities();
+
+                    Game.LogTrivial("Unrelated entities cleared");
+                    GameFiber.Yield();
+
+                    SpawnAllBarriers();
+
+                    SpawnAllPoliceCars();
+                    GameFiber.Yield();
+
+                    SpawnBothSwatTeams();
+                    GameFiber.Yield();
+
+                    SpawnNegotiationRobbers();
+
+                    GameFiber.Yield();
+                    SpawnAllPoliceOfficers();
+
+
+                    GameFiber.Yield();
+
+
+                    SpawnSneakyRobbers();
+
+                    SpawnHostages();
+                    GameFiber.Yield();
+
+                    SpawnEMSAndFire();
+
+                    GameFiber.Yield();
+
+                    if (AssortedCalloutsHandler.rnd.Next(10) < 2)
+                    {
+                        SpawnVaultRobbers();
+                        proc.ActivateProcess(HandleVaultRobbers);
+                    }
+
+                    Game.LogTrivial("Done spawning");
+
+                    MakeNearbyPedsFlee();
+
+                    SneakyRobbersAI();
+
+                    HandleHostages();
+
+                    HandleOpenBackRiotVan();
+
+
+                    HandleAudio();
+
+                    Game.LogTrivial("Initialisation complete, entering loop");
+
+                    while (CalloutRunning)
+                    {
+                        GameFiber.Yield();
+
+                        //Constants
+                        Game.LocalPlayer.Character.CanAttackFriendlies = false;
+
+                        SetRelationshipGroups(Relationship.Respect);
+
+                        Game.LocalPlayer.Character.IsInvincible = false;
+
+                        SetWeaponModifiersForPlayer(0.92f);
+
+                        DoorControl();
+
+                        //When player has just arrived
+                        if (!TalkedToWells && !fighting)
+                        {
+                            if (!Player.IsInAnyVehicle(false))
+                            {
+                                if (DistToPlayer(CaptainWells.Position) < 4f)
+                                {
+                                    Game.DisplayHelp("Press ~b~" + AssortedCalloutsHandler.kc.ConvertToString(AssortedCalloutsHandler.TalkKey) + " ~s~to talk.");
+                                    if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.TalkKey))
+                                    {
+                                        TalkedToWells = true;
+                                        if (ComputerPlusRunning)
+                                        {
+                                            API.ComputerPlusFuncs.AddUpdateToCallout(CalloutID, "Spoken with Captain Wells.");
+                                        }
+                                        DetermineInitialDialogue();
+                                    }
+                                }
+                                else
+                                {
+                                    Game.DisplayHelp("~h~Officer, please report to ~g~Captain Wells ~s~for briefing.");
+                                }
+                            }
+                        }
+
+                        //If fighting is initialised
+                        if (!FightingPrepared)
+                        {
+                            if (fighting)
+                            {
+                                if (ComputerPlusRunning)
+                                {
+                                    API.ComputerPlusFuncs.AddUpdateToCallout(CalloutID, "Preparing to enter the bank with SWAT.");
+                                }
+
+                                SpawnAssaultRobbers();
+
+                                SpawnMiniGunRobber();
+
+                                CopFightingAI();
+
+                                RobbersFightingAI();
+
+                                CheckForRobbersOutside();
+
+                                FightingPrepared = true;
+                            }
+                        }
+
+                        //If player talks to cpt wells during fight
+                        if (fighting)
+                        {
+                            if (!Game.LocalPlayer.Character.IsInAnyVehicle(false))
+                            {
+                                if (Vector3.Distance(PlayerPosition, CaptainWells.Position) < 3f)
+                                {
+                                    Game.DisplayHelp("Press ~b~" + AssortedCalloutsHandler.kc.ConvertToString(AssortedCalloutsHandler.TalkKey) + " ~s~to talk.");
+                                    if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.TalkKey))
+                                    {
+                                        SpeechHandler.CptWellsLineAudioCount = 24;
+                                        SpeechHandler.HandleBankHeistSpeech(new List<string>() { "Cpt. Wells: Go on! There are still hostages in there!" }, LineFolderModifier: "Assault", WaitAfterLastLine: false);
+                                    }
+                                }
+                            }
+                        }
+
+
+                        //TODO: NEXT TO REVIEW
+
+                        //Make everyone fight if player enters bank
+                        if (!fighting && !Surrendering)
+                        {
+                            //NOTE: assign gives less overhead than read->compare(->assign)
+                            fighting = PacificBankInsideChecks.Any(c => Vector3.Distance(c, PlayerPosition) < 2.3f);
+                        }
+                        //If all hostages rescued break
+                        if (SafeHostagesCount == AliveHostagesCount)
+                        {
+                            break;
+                        }
+
+                        //If surrendered
+                        if (SurrenderComplete)
+                        {
+                            if (ComputerPlusRunning)
+                            {
+                                API.ComputerPlusFuncs.AddUpdateToCallout(CalloutID, "Robbers have surrendered. Going in to save hostages.");
+                            }
+                            break;
+                        }
+
+                        if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.FollowKey))
+                        {
+                            SWATFollowing = !SWATFollowing;
+                            string s = SWATFollowing ? "now" : "no longer";
+                            Game.DisplaySubtitle($"The ~b~SWAT Units ~s~are {s} following you.", 3000);
+                        }
+                        if (SWATFollowing)
+                        {
+                            if (Game.LocalPlayer.Character.IsShooting)
+                            {
+                                SWATFollowing = false;
+                                Game.DisplaySubtitle("The ~b~SWAT Units ~s~are no longer following you.", 3000);
+                                Game.LogTrivial("Follow off - shooting");
+                            }
+                        }
+                    }
+
+                    //When surrendered
+                    if (SurrenderComplete)
+                    {
+                        CopFightingAI();
+                    }
+
+                    while (CalloutRunning)
+                    {
+                        GameFiber.Yield();
+
+                        SetRelationshipGroups(Relationship.Companion);
+
+                        Game.LocalPlayer.Character.IsInvincible = false;
+
+                        SetWeaponModifiersForPlayer(0.93f);
+
+                        DoorControl();
+
+                        //If all host rescued
+
+                        if (SafeHostagesCount == AliveHostagesCount)
+                        {
+                            GameFiber.Wait(3000);
+                            break;
+                        }
+                        if (ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.FollowKey))
+                        {
+                            SWATFollowing = !SWATFollowing;
+
+                            if (SWATFollowing)
+                            {
+                                Game.DisplaySubtitle("The ~b~SWAT Units ~s~are following you.", 3000);
+                            }
+                            else
+                            {
+                                Game.DisplaySubtitle("The ~b~SWAT Units ~s~are no longer following you.", 3000);
+                            }
+                        }
+                        if (SWATFollowing)
+                        {
+                            if (Game.LocalPlayer.Character.IsShooting)
+                            {
+                                SWATFollowing = false;
+                                Game.DisplaySubtitle("The ~b~SWAT Units ~s~are no longer following you.", 3000);
+                                Game.LogTrivial("Follow off - shooting");
+                            }
+                        }
+
+                        if (!Game.LocalPlayer.Character.IsInAnyVehicle(false))
+                        {
+                            if (DistToPlayer(CaptainWells.Position) < 4f)
+                            {
+                                Game.DisplayHelp("Press ~b~" + AssortedCalloutsHandler.kc.ConvertToString(AssortedCalloutsHandler.TalkKey) + " ~s~to talk.");
+
+                                if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.TalkKey))
+                                {
+                                    if (!TalkedToWells2nd)
+                                    {
+                                        List<string> CptWellsSurrenderedDialogue = new List<string>() { "Cpt. Wells: Amazing job, officer! It seems the robbers surrendered!", "Cpt. Wells: Your job now is to rescue all the hostages from the bank.", "Cpt. Wells: Please take care, you never know what the robbers left inside.", "Cpt. Wells: We have no idea if there are still robbers inside.", "You: Roger that, sir. This situation will be over in no time!", "You: Where can I get geared up?", "Cpt. Wells: There's gear in the back of the riot vans." };
+                                        SpeechHandler.HandleBankHeistSpeech(CptWellsSurrenderedDialogue);
+                                        TalkedToWells2nd = true;
+                                        fighting = true;
+                                        Game.DisplayNotification("Press ~b~" + AssortedCalloutsHandler.FollowKey + " ~s~to make the SWAT teams follow you.");
+                                    }
+                                    else
+                                    {
+                                        SpeechHandler.CptWellsLineAudioCount = 24;
+                                        SpeechHandler.HandleBankHeistSpeech(new List<string>() { "Cpt. Wells: Go on! There are still more hostages in there!" }, LineFolderModifier: "Assault", WaitAfterLastLine: false);
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                if (!TalkedToWells2nd)
+                                {
+                                    Game.DisplayHelp("~h~Officer, please report to ~g~Captain Wells.");
+                                }
+                            }
+                        }
+                    }
+
+                    //The end
+                    SWATFollowing = false;
+                    DoneFighting = true;
+                    CurrentAudioState = AudioState.None;
+                    AudioStateChanged = true;
+
+                    while (CalloutRunning)
+                    {
+                        GameFiber.Yield();
+
+                        DoorControl();
+
+                        if (!EvaluatedWithWells)
+                        {
+                            if (!Game.LocalPlayer.Character.IsInAnyVehicle(false))
+                            {
+                                if (DistToPlayer(CaptainWells.Position) < 4f)
+                                {
+                                    Game.DisplayHelp("Press ~b~" + AssortedCalloutsHandler.kc.ConvertToString(AssortedCalloutsHandler.TalkKey) + " ~s~to talk.");
+                                    if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.TalkKey))
+                                    {
+                                        TalkedToWells = true;
+                                        FinalDialogue();
+                                        GameFiber.Wait(4000);
+                                        DetermineResults();
+
+                                        GameFiber.Wait(9000);
+                                        break;
+                                    }
+                                }
+                                else
+                                {
+                                    Game.DisplayHelp("~h~Talk to ~g~Captain Wells~s~.");
+                                }
+                            }
+                        }
+                    }
+
+                    if (CalloutRunning)
+                    {
+                        Functions.PlayScannerAudio("ATTENTION_THIS_IS_DISPATCH_HIGH WE_ARE_CODE FOUR NO_FURTHER_UNITS_REQUIRED");
+                        Game.DisplayNotification("~o~Bank Heist ~s~callout is ~g~CODE 4.");
+                        CalloutFinished = true;
+                    }
+
+                    End();
+                }
+                catch (Exception e)
+                {
+                    Game.LogTrivial(e.ToString());
+                    End();
+                }
+            });
+        }
+
+        //STAGES APPROACH========================================================================
+        private const float DIST_SPAWN_ENTITIES = 350f;
+        private readonly ProcessHost proc = new ProcessHost();
+
+        private void IsPlayerAtScene()
+        {
+            if (DistToPlayer(SpawnPoint) < DIST_SPAWN_ENTITIES)
+            {
+                if (Player.IsInAnyVehicle(false))
+                {
+                    AllBankHeistEntities.Add(Player.CurrentVehicle);
+                    AllBankHeistEntities.AddRange(Player.CurrentVehicle.Passengers);
+                }
+
+                proc.ActivateProcess(CreateSpeedZone_Process);
+
+                ClearUnrelatedEntities();
+
+                SpawnAllBarriers();
+
+                SpawnAllPoliceCars();
+
+                SpawnBothSwatTeams();
+
+                SpawnNegotiationRobbers();
+
+                SpawnAllPoliceOfficers();
+
+                SpawnSneakyRobbers();
+
+                SpawnHostages();
+
+                SpawnEMSAndFire();
+
+                if (AssortedCalloutsHandler.rnd.Next(10) < 2)
+                {
+                    //TODO: NEXT TO REVIEW
+                    SpawnVaultRobbers();
+                    proc.ActivateProcess(HandleVaultRobbers);
+                }
+
+                proc.ActivateProcess(MakeNearbyPedsFlee);
+
+                proc.ActivateProcess(SneakyRobbersAI);
+
+                proc.ActivateProcess(SneakyRobberCanInitFight_Process);
+
+                proc.ActivateProcess(SneakyRobberFightInProgress);
+
+                proc.ActivateProcess(HandleEndangeredHostages);
+
+                proc.ActivateProcess(HandleRescuedHostages);
+
+                proc.ActivateProcess(HandleSafeHostages);
+
+                proc.ActivateProcess(HandleOpenBackRiotVan);
+
+                proc.ActivateProcess(HandleAudio);
+
+                proc.ActivateProcess(KeepPlayersFeatures);
+
+                proc.ActivateProcess(DoorControl);
+
+                proc.ActivateProcess(TalkToWellsOnArrival);
+
+                proc.ActivateProcess(TalkToWellsDuringFight);
+
+                proc.ActivateProcess(PrepareFighting);
+
+                //decide what function use as-is and which should remodeled to stages
+
+                //swap
+            }
+        }
+
+        private void ClearUnrelatedEntities()
+        {
+            var entitiesToRemove = World.GetEntities(SpawnPoint, 50f, GetEntitiesFlags.ConsiderAllPeds | GetEntitiesFlags.ConsiderAllVehicles).ToList();
+            Func<Entity, bool> selector = p => p.Exists() && p.IsValid() && p != Player && !p.CreatedByTheCallingPlugin && !AllBankHeistEntities.Contains(p) && p != Player.CurrentVehicle;
+            entitiesToRemove.ForEach(e => { if (selector(e)) e.Delete(); });
+        }
+
+        private void SpawnAllBarriers()
+        {
+            Barriers_.ForEach(b =>
+            {
+                b.Instance = PlaceBarrier(b.Position, b.Heading);
+                b.InvisibleWall = CreateInvisibleWallForBarrier(b.Position, b.Heading);
+                b.Ped = BarrierPed(b.Position);
+                AllBankHeistEntities.Add(b.Instance);
+            });
+        }
+
+        private Rage.Object PlaceBarrier(Vector3 Location, float Heading)
+        {
+            Rage.Object Barrier = new Rage.Object("prop_barrier_work05", Location);
+            Barrier.Heading = Heading;
+            Barrier.IsPositionFrozen = true;
+            Barrier.IsPersistent = true;
+            return Barrier;
+        }
+
+        private Rage.Object CreateInvisibleWallForBarrier(Vector3 pos, float head)
+        {
+            Rage.Object invWall = new Rage.Object("p_ice_box_01_s", pos, head);
+            invWall.IsVisible = false;
+            invWall.IsPersistent = true;
+            return invWall;
+        }
+
+        private Ped BarrierPed(Vector3 pos)
+        {
+            Ped invPed = new Ped(pos);
+            invPed.IsVisible = false;
+            invPed.IsPositionFrozen = true;
+            invPed.BlockPermanentEvents = true;
+            invPed.IsPersistent = true;
+            return invPed;
+        }
+
+        private void KeepPlayersFeatures()
+        {
+            Player.CanAttackFriendlies = false;
+
+            SetRelationshipGroups(Relationship.Respect);
+
+            Player.IsInvincible = false;
+
+            SetWeaponModifiersForPlayer(0.92f);
+        }
+
+        private void TalkToWellsOnArrival()
+        {
+            if (!fighting)
+            {
+                if (!Player.IsInAnyVehicle(false))
+                {
+                    if (DistToPlayer(CaptainWells.Position) < 4f)
+                    {
+                        Game.DisplayHelp("Press ~b~" + AssortedCalloutsHandler.kc.ConvertToString(AssortedCalloutsHandler.TalkKey) + " ~s~to talk.");
+
+                        if (ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.TalkKey))
+                        {
+                            proc.DeactivateProcess(TalkToWellsOnArrival);
+
+                            if (ComputerPlusRunning)
+                            {
+                                API.ComputerPlusFuncs.AddUpdateToCallout(CalloutID, "Spoken with Captain Wells.");
+                            }
+
+                            DetermineInitialDialogue();
+                        }
+                    }
+                    else
+                    {
+                        Game.DisplayHelp("~h~Officer, please report to ~g~Captain Wells ~s~for briefing.");
+                    }
+                }
+            }
+        }
+
+        private void TalkToWellsDuringFight()
+        {
+            if (fighting)
+            {
+                if (!Player.IsInAnyVehicle(false))
+                {
+                    if (DistToPlayer(CaptainWells.Position) < 3f)
+                    {
+                        Game.DisplayHelp("Press ~b~" + AssortedCalloutsHandler.kc.ConvertToString(AssortedCalloutsHandler.TalkKey) + " ~s~to talk.");
+
+                        if (ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.TalkKey))
+                        {
+                            SpeechHandler.CptWellsLineAudioCount = 24;
+                            SpeechHandler.HandleBankHeistSpeech(new List<string>() { "Cpt. Wells: Go on! There are still hostages in there!" }, LineFolderModifier: "Assault", WaitAfterLastLine: false);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void PrepareFighting()
+        {
+            if (fighting)
+            {
+                if (ComputerPlusRunning)
+                {
+                    API.ComputerPlusFuncs.AddUpdateToCallout(CalloutID, "Preparing to enter the bank with SWAT.");
+                }
+
+                SpawnAssaultRobbers();
+
+                SpawnMiniGunRobber();
+
+                CopFightingAI();
+
+                RobbersFightingAI();
+
+                CheckForRobbersOutside();
+
+                proc.DeactivateProcess(PrepareFighting);
+            }
+        }
+
+        private void CreateSpeedZone_Process()
+        {
+            var vehs = World.GetEntities(SpawnPoint, 75f, GetEntitiesFlags.ConsiderGroundVehicles | GetEntitiesFlags.ExcludePoliceCars | GetEntitiesFlags.ExcludeFiretrucks | GetEntitiesFlags.ExcludeAmbulances);
+            foreach (Vehicle veh in vehs)
+            {
+                if (AllBankHeistEntities.Contains(veh))
+                {
+                    continue;
+                }
+
+                if (!veh.Exists() || veh == Player.CurrentVehicle || veh.CreatedByTheCallingPlugin)
+                {
+                    continue;
+                }
+
+                if (veh.Velocity.Length() > 0f)
+                {
+                    Vector3 velocity = veh.Velocity;
+                    velocity.Normalize();
+                    velocity *= 0f;
+                    veh.Velocity = velocity;
+                }
+            }
+        }
+
+        //STAGES APPROACH END========================================================================
+        
+            //STATUS: unchanged, incorporate into spawning f()'s?
         private void LoadModels()
         {
             foreach (string s in LSPDModels)
@@ -204,15 +788,12 @@ namespace AssortedCallouts.Callouts
                 new Model(s).Load();
             }
             new Model("s_m_y_robber_01").Load();
-
         }
-        //Dialogue 
 
-        private List<string> AlarmAnswers = new List<string>() { "You: Yeah definitely, I can't hear myself think with that thing going.", "You: Nah, it doesn't bother me that much." };
         private Rage.Object MobilePhone;
+        //STATUS: UNCHANGED
         private void ToggleMobilePhone(Ped ped, bool toggle)
         {
-
             if (toggle)
             {
                 NativeFunction.Natives.SET_PED_CAN_SWITCH_WEAPON(ped, false);
@@ -221,20 +802,21 @@ namespace AssortedCallouts.Callouts
                 int boneIndex = NativeFunction.Natives.GET_PED_BONE_INDEX<int>(ped, (int)PedBoneId.RightPhHand);
                 NativeFunction.Natives.ATTACH_ENTITY_TO_ENTITY(MobilePhone, ped, boneIndex, 0f, 0f, 0f, 0f, 0f, 0f, true, true, false, false, 2, 1);
                 ped.Tasks.PlayAnimation("cellphone@", "cellphone_call_listen_base", 1.3f, AnimationFlags.Loop | AnimationFlags.UpperBodyOnly | AnimationFlags.SecondaryTask);
-
             }
             else
             {
                 NativeFunction.Natives.SET_PED_CAN_SWITCH_WEAPON(ped, true);
                 ped.Tasks.Clear();
+
                 if (GameFiber.CanSleepNow)
                 {
                     GameFiber.Wait(800);
                 }
-                if (MobilePhone.Exists()) { MobilePhone.Delete(); }
+
+                DeleteEntity(MobilePhone);
             }
         }
-
+        //STATUS: UNCHANGED
         private void GetMaria()
         {
             Game.LocalPlayer.Character.IsPositionFrozen = true;
@@ -263,7 +845,7 @@ namespace AssortedCallouts.Callouts
             Maria.Tasks.FollowNavigationMeshToPosition(Game.LocalPlayer.Character.GetOffsetPosition(Vector3.RelativeRight * 1.5f), Game.LocalPlayer.Character.Heading, 1.9f).WaitForCompletion(60000);
             Game.LocalPlayer.Character.IsPositionFrozen = false;
         }
-
+        //STATUS: UNCHANGED
         private void NegotiationIntro()
         {
             SpeechHandler.YouLineAudioCount = 1;
@@ -274,6 +856,7 @@ namespace AssortedCallouts.Callouts
             List<string> IntroLines = new List<string>() { "Robber: Who the hell is this? I'm busy!", "You: I'm an officer with the LSPD. Who am I speaking to?", "Robber: Shut up! I'm in control here!" };
             SpeechHandler.HandleBankHeistSpeech(IntroLines, LineFolderModifier: "NegotiationIntro");
             List<string> IntroAnswers = new List<string>() { "You: Look, the bank is surrounded, we all want to go home, just come out peacefully.", "You: OK, what do you want?", "You: Can't we make a deal?" };
+
             int res = SpeechHandler.DisplayAnswers(IntroAnswers);
 
             if (res == 0)
@@ -305,13 +888,12 @@ namespace AssortedCallouts.Callouts
             }
             else
             {
-
                 while (CalloutRunning)
                 {
                     GameFiber.Yield();
                     Game.DisplayHelp("Press ~b~" + AssortedCalloutsHandler.kc.ConvertToString(AssortedCalloutsHandler.TalkKey) + " ~s~to signal the SWAT teams to move in.");
 
-                    if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.TalkKey))
+                    if (ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.TalkKey))
                     {
                         SpeechHandler.HandleBankHeistSpeech(new List<string>() { "~b~You: ~s~SWAT Team Alpha, ~g~green light!~s~ Move in!" }, WaitAfterLastLine: false);
                         Game.DisplayNotification("Press ~b~" + AssortedCalloutsHandler.kc.ConvertToString(AssortedCalloutsHandler.FollowKey) + " ~s~to make the SWAT teams follow you.");
@@ -320,12 +902,10 @@ namespace AssortedCallouts.Callouts
                     }
                 }
             }
-
         }
-
+        //STATUS: UNCHANGED
         private void NegotiationOne()
         {
-
             List<string> Robber1 = new List<string>() { "Robber: Fuck you! I'll kill a hostage if you come anywhere near that door!" };
             SpeechHandler.HandleBankHeistSpeech(Robber1, LineFolderModifier: "NegotiationOne");
             List<string> Answers1 = new List<string>() { "You: Calm down. We don't want anyone to get hurt.", "You: OK. What do you want?", "You: You do that and every cop in the city will be in that bank!" };
@@ -442,6 +1022,7 @@ namespace AssortedCallouts.Callouts
             }
 
         }
+        //STATUS: UNCHANGED
         private void NegotiationTwo()
         {
             List<string> Robber2 = new List<string>() { "Robber: We want a bus to take us to Los Santos International.", "Robber: From there, we want a plane to fly us to Liberty City." };
@@ -686,9 +1267,6 @@ namespace AssortedCallouts.Callouts
                 }
             }
         }
-
-
-
         private void DetermineInitialDialogue()
         {
             List<string> InitialDialogue = new List<string>() { "You: Sir, what's the situation?", "Cpt. Wells: Well, we have multiple armed suspects in the bank with hostages.", "You: How many robbers are there?", "Cpt. Wells: We don't know how many are in there, officer.", "Cpt. Wells: The way I see it you have two options.", "Cpt. Wells: You could attempt to negotiate with them.", "Cpt. Wells: Alternatively, you can go in with SWAT Team Alpha." };
@@ -700,7 +1278,6 @@ namespace AssortedCallouts.Callouts
             //If negotiate
             if (result == 0)
             {
-
                 SpeechHandler.CptWellsLineAudioCount = 6;
                 SpeechHandler.YouLineAudioCount = 3;
                 List<string> NegotiationDialogue = new List<string>() { NegOrAss[result], "Cpt. Wells: Alright. The SWAT team will have your back!", "Cpt. Wells: Also, do you want our tech team to kill that alarm?" };
@@ -784,10 +1361,8 @@ namespace AssortedCallouts.Callouts
                     }
                 }
             }
-
-
         }
-
+        //STATUS: UNCHANGED
         private void NegotiationRobbersSurrender()
         {
             SurrenderComplete = false;
@@ -820,8 +1395,8 @@ namespace AssortedCallouts.Callouts
                             {
                                 Robbers[i].Position = RobbersSurrenderLocations[i];
                                 Robbers[i].Heading = RobbersSurrenderHeadings[i];
-
                             }
+
                             break;
                         }
                         for (int i = 0; i < Robbers.Count; i++)
@@ -838,14 +1413,17 @@ namespace AssortedCallouts.Callouts
                                 break;
                             }
                         }
-                        for (int i = 0; i < SWATUnitsSpawned.Count; i++)
+
+                        foreach (var op in SWATOperators)
                         {
                             GameFiber.Wait(100);
                             Ped robber = Robbers[AssortedCalloutsHandler.rnd.Next(Robbers.Count)];
-                            Rage.Native.NativeFunction.Natives.TASK_AIM_GUN_AT_COORD(SWATUnitsSpawned[i], robber.Position.X, robber.Position.Y, robber.Position.Z, -1, false, false);
+                            Rage.Native.NativeFunction.Natives.TASK_AIM_GUN_AT_COORD(op, robber.Position.X, robber.Position.Y, robber.Position.Z, -1, false, false);
                         }
                     }
+
                     GameFiber.Wait(1000);
+
                     for (int i = 0; i < Robbers.Count; i++)
                     {
                         GameFiber.Yield();
@@ -893,25 +1471,28 @@ namespace AssortedCallouts.Callouts
                             }
                         }
                     }
-                    foreach (Ped swatunit in SWATUnitsSpawned)
+
+                    foreach (var op in SWATOperators)
                     {
-                        swatunit.Tasks.Clear();
+                        op.Instance.Tasks.Clear();
                     }
+
                     for (int i = 0; i < Robbers.Count; i++)
                     {
                         Robbers[i].Tasks.PlayAnimation("mp_arresting", "idle", 8f, AnimationFlags.UpperBodyOnly | AnimationFlags.SecondaryTask | AnimationFlags.Loop);
-                        Robbers[i].Tasks.FollowNavigationMeshToPosition(AllSpawnedPoliceVehicles[i].GetOffsetPosition(Vector3.RelativeLeft * 2f), AllSpawnedPoliceVehicles[i].Heading, 1.58f);
-                        PoliceOfficersArresting[i].Tasks.FollowNavigationMeshToPosition(AllSpawnedPoliceVehicles[i].GetOffsetPosition(Vector3.RelativeLeft * 2f), AllSpawnedPoliceVehicles[i].Heading, 1.55f);
+                        Robbers[i].Tasks.FollowNavigationMeshToPosition(PoliceVehicles[i].Instance.GetOffsetPosition(Vector3.RelativeLeft * 2f), PoliceVehicles[i].Heading, 1.58f);
+                        PoliceOfficersArresting[i].Tasks.FollowNavigationMeshToPosition(PoliceVehicles[i].Instance.GetOffsetPosition(Vector3.RelativeLeft * 2f), PoliceVehicles[i].Instance.Heading, 1.55f);
                     }
+
                     GameFiber.Wait(5000);
                     SurrenderComplete = true;
                     GameFiber.Wait(12000);
                     for (int i = 0; i < Robbers.Count; i++)
                     {
                         Robbers[i].BlockPermanentEvents = true;
-                        Robbers[i].Tasks.EnterVehicle(AllSpawnedPoliceVehicles[i], 11000, 1);
+                        Robbers[i].Tasks.EnterVehicle(PoliceVehicles[i].Instance, 11000, 1);
                         PoliceOfficersArresting[i].BlockPermanentEvents = true;
-                        PoliceOfficersArresting[i].Tasks.EnterVehicle(AllSpawnedPoliceVehicles[i], 11000, -1);
+                        PoliceOfficersArresting[i].Tasks.EnterVehicle(PoliceVehicles[i].Instance, 11000, -1);
                     }
                     GameFiber.Wait(11100);
                 }
@@ -921,47 +1502,44 @@ namespace AssortedCallouts.Callouts
                 }
             });
         }
-
+        //STATUS: UNCHANGED, make a proc
         private void CheckForRobbersOutside()
         {
+        //NOTES:
+        // - look for a way to LINQ the conditional list.Add
             GameFiber.StartNew(delegate
             {
                 while (CalloutRunning)
                 {
                     GameFiber.Yield();
-                    if (fighting)
+
+                    if (!fighting) continue;
+                    foreach (Vector3 Location in PacificBankDoors)
                     {
+                        var robbers = World.GetEntities(Location, 1.6f, GetEntitiesFlags.ConsiderAllPeds).ToList();
 
-                        foreach (Vector3 Location in PacificBankDoors)
+                        robbers.RemoveAll(r => !r.Exists() || r.IsDead || Vector3.Distance(r.Position, Location) < 1.5f);
+
+                        var robbersOnTheGlobalRobbersList = robbers.FindAll(r => Robbers.Contains(r));
+
+                        foreach (var robber in robbersOnTheGlobalRobbersList)
                         {
-                            foreach (Ped robber in World.GetEntities(Location, 1.6f, GetEntitiesFlags.ConsiderAllPeds))
+                            if (!PoliceOfficersTargetsToShoot.Contains(robber))
                             {
-                                if (robber.Exists())
-                                {
-                                    if (Vector3.Distance(robber.Position, Location) < 1.5f)
-                                    {
-                                        if (robber.IsAlive)
-                                        {
-                                            if (Robbers.Contains(robber))
-                                            {
-                                                if (!PoliceOfficersTargetsToShoot.Contains(robber))
-                                                {
-
-                                                    PoliceOfficersTargetsToShoot.Add(robber);
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                }
+                                PoliceOfficersTargetsToShoot.Add(robber as Ped);
                             }
                         }
                     }
                 }
             });
         }
+        //STATUS: UNCHANGED
         private void CopsReturnToLocation()
         {
+        //NOTES:
+        // - make struct to hold ped and it's default standing pos
+            //var validCops = PoliceOfficersStandingSpawned.FindAll(o => o.Exists() && o.IsAlive);
+
             for (int i = 0; i < PoliceOfficersStandingSpawned.Count; i++)
             {
                 if (PoliceOfficersStandingSpawned[i].Exists())
@@ -1004,99 +1582,163 @@ namespace AssortedCallouts.Callouts
                         }
                     }
                 }
-
             }
         }
+        //STATUS: refactored, review
         private void SneakyRobbersAI()
         {
-            GameFiber.StartNew(delegate
+            //TODO:
+            // - extract behaviour to a dedicated sneaky robber class
+            // OR
+            // - add IsFighting bool as a data class member
+
+            var validSneakyRobbers = SneakyRobbers.FindAll(r => r.Instance.Exists() && r.Instance.IsAlive && !SneakyRobbersFighting.Contains(r.Instance));
+
+            foreach (var r in validSneakyRobbers)
             {
-
-                while (CalloutRunning)
+                if (Vector3.Distance(r.Instance.Position, r.Position) > 0.7f)
                 {
-                    try
+                    r.Instance.Tasks.FollowNavigationMeshToPosition(r.Position, r.Heading, 2f).WaitForCompletion(300);
+                }
+                else
+                {
+                    if (!NativeFunction.Natives.IS_ENTITY_PLAYING_ANIM<bool>(r.Instance, "cover@weapon@rpg", "blindfire_low_l_enter_low_edge", 3))
                     {
-                        GameFiber.Yield();
+                        r.Instance.Tasks.PlayAnimation("cover@weapon@rpg", "blindfire_low_l_enter_low_edge", 2f, AnimationFlags.StayInEndFrame).WaitForCompletion(20);
+                    }
+                }
 
-                        foreach (Ped sneakyrobber in RobbersSneakySpawned)
+                var nearestPeds = r.Instance.GetNearbyPeds(3).Where(p => p.Exists() && p.IsAlive && (p.RelationshipGroup == "PLAYER" || p.RelationshipGroup == "COP")).ToList();
+
+                foreach (Ped nearestPed in nearestPeds)
+                {
+                    if (Vector3.Distance(nearestPed.Position, r.Instance.Position) < 3.9f)
+                    {
+                        if (Math.Abs(nearestPed.Position.Z - r.Instance.Position.Z) < 0.9f)
                         {
-                            if (sneakyrobber.Exists())
+                            SneakyRobbersFighting.Add(r.Instance);
+                            SneakyRobberFight(r.Instance, nearestPed);
+
+                            //RobberAttackSituation.Add(new RobberAttackData() { Robber = r.Instance, AttackedPed = nearestPed });
+
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        private List<Ped> SneakyRobbersFighting = new List<Ped>();
+        //SneakyFighting: <Ped, Ped>: robber, nearestPed
+
+        //private List<Tuple<Ped, Ped>>
+        private List<RobberAttackData> RobberAttackSituation = new List<RobberAttackData>();
+
+        private List<RobberAttackData> RobberAttackRobberFights = new List<RobberAttackData>();
+
+        private class RobberAttackData
+        {
+            public Ped Robber;
+            public Ped AttackedPed;
+        }
+
+        private Entity entityPlayerAimingAtSneakyRobber = null;
+        //STATUS: refactored, review
+        private void SneakyRobberCanInitFight_Process()
+        {
+            for (int i = RobberAttackSituation.Count - 1; i >= 0; i--)
+            {
+                var attack = RobberAttackSituation[i];
+                if (!attack.Robber.Exists() || !attack.AttackedPed.Exists() || !attack.Robber.IsAlive || !attack.AttackedPed.IsAlive)
+                {
+                    RobberAttackSituation.RemoveAt(i);
+                    continue;
+                }
+
+                var dist = Vector3.Distance(attack.AttackedPed.Position, attack.Robber.Position);
+                //TODO: try w/o try..catch
+                try { entityPlayerAimingAtSneakyRobber = GetEntityPlayerAimsAt(); } catch (Exception e) { };
+                if (dist > 5.1f || dist < 1.7f || entityPlayerAimingAtSneakyRobber == attack.Robber || RescuingHostage)
+                {
+                    RobberAttackSituation.RemoveAt(i);
+                    SneakyRobberFight(attack);
+                    RobberAttackRobberFights.Add(attack);
+                }
+            }
+        }
+        //STATUS: refactored
+        private void SneakyRobberFight(RobberAttackData r)
+        {
+            if (r.Robber.Exists())
+            {
+                r.Robber.Tasks.FightAgainstClosestHatedTarget(15f);
+                r.Robber.RelationshipGroup = "ROBBERS";
+            }
+        }
+        //STATUS: refactored, review
+        private void SneakyRobberFightInProgress()
+        {
+            for (int i = RobberAttackRobberFights.Count - 1; i >= 0; i--)
+            {
+                var r = RobberAttackRobberFights[i];
+
+                if (!r.Robber.Exists() || r.Robber.IsDead || !r.AttackedPed.Exists())
+                {
+                    continue;
+                }
+
+                Rage.Native.NativeFunction.Natives.STOP_CURRENT_PLAYING_AMBIENT_SPEECH(r.Robber);
+
+                if (!r.AttackedPed.IsDead) continue;
+
+                foreach (var hostage in Hostages)
+                {
+                    if (Math.Abs(hostage.Position.Z - r.Robber.Position.Z) < 0.6f)
+                    {
+                        if (Vector3.Distance(hostage.Position, r.Robber.Position) < 14f)
+                        {
+                            int waitCount = 0;
+                            while (hostage.Instance.IsAlive)
                             {
-                                if (sneakyrobber.IsAlive)
+                                GameFiber.Yield();
+                                waitCount++;
+                                if (waitCount > 450)
                                 {
-                                    if (!SneakyRobbersFighting.Contains(sneakyrobber))
-                                    {
-                                        if (Vector3.Distance(sneakyrobber.Position, RobbersSneakyLocations[RobbersSneakySpawned.IndexOf(sneakyrobber)]) > 0.7f)
-                                        {
-
-                                            sneakyrobber.Tasks.FollowNavigationMeshToPosition(RobbersSneakyLocations[RobbersSneakySpawned.IndexOf(sneakyrobber)], RobbersSneakyHeadings[RobbersSneakySpawned.IndexOf(sneakyrobber)], 2f).WaitForCompletion(300);
-                                        }
-                                        else
-                                        {
-                                            if (!NativeFunction.Natives.IS_ENTITY_PLAYING_ANIM<bool>(sneakyrobber, "cover@weapon@rpg", "blindfire_low_l_enter_low_edge", 3))
-                                            {
-
-                                                sneakyrobber.Tasks.PlayAnimation("cover@weapon@rpg", "blindfire_low_l_enter_low_edge", 2f, AnimationFlags.StayInEndFrame).WaitForCompletion(20);
-                                            }
-
-                                        }
-                                        Ped[] nearestPeds = sneakyrobber.GetNearbyPeds(3);
-                                        if (nearestPeds.Length > 0)
-                                        {
-                                            foreach (Ped nearestPed in nearestPeds)
-                                            {
-                                                if (nearestPed != null)
-                                                {
-                                                    if (nearestPed.Exists())
-                                                    {
-                                                        if (nearestPed.IsAlive)
-                                                        {
-                                                            if (nearestPed.RelationshipGroup == "PLAYER" || nearestPed.RelationshipGroup == "COP")
-                                                            {
-                                                                if (Vector3.Distance(nearestPed.Position, sneakyrobber.Position) < 3.9f)
-                                                                {
-                                                                    if (Math.Abs(nearestPed.Position.Z - sneakyrobber.Position.Z) < 0.9f)
-                                                                    {
-
-                                                                        SneakyRobberFight(sneakyrobber, nearestPed);
-                                                                        break;
-                                                                    }
-                                                                }
-
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                    }
+                                    hostage.Instance.Kill();
                                 }
                             }
+
+                            break;
                         }
-
-
                     }
-                    catch (Exception e) { Game.LogTrivial(e.ToString()); }
                 }
-            });
+            }
+
+            RobberAttackRobberFights.Clear();
         }
-        private List<Ped> SneakyRobbersFighting = new List<Ped>();
-        private Entity entityPlayerAimingAtSneakyRobber = null;
+        //STATUS: old function, obsolete
+        [Obsolete("Replace with specific f()")]
         private void SneakyRobberFight(Ped sneakyrobber, Ped nearestPed)
         {
+        //TODO: WARNING! HARDCORE SOLUTIONS
+            //TODO:
+            // - process those in SneakyRobbersFighting list?
+
             GameFiber.StartNew(delegate
             {
                 try
                 {
-                    SneakyRobbersFighting.Add(sneakyrobber);
+
+                    //loop keeps robber inactive until dist is between min and max OR player aims at robber
                     while (CalloutRunning)
                     {
                         GameFiber.Yield();
+
                         if (!nearestPed.Exists()) { break; }
                         if (!sneakyrobber.Exists()) { break; }
                         if (!sneakyrobber.IsAlive) { break; }
                         if (!nearestPed.IsAlive) { break; }
+
                         if (Vector3.Distance(nearestPed.Position, sneakyrobber.Position) > 5.1f)
                         {
                             break;
@@ -1105,39 +1747,38 @@ namespace AssortedCallouts.Callouts
                         {
                             break;
                         }
+
                         try
                         {
-                            unsafe
-                            {
-                                uint entityHandle;
-                                NativeFunction.Natives.x2975C866E6713290(Game.LocalPlayer, new IntPtr(&entityHandle)); // Stores the entity the player is aiming at in the uint provided in the second parameter.
-
-                                entityPlayerAimingAtSneakyRobber = World.GetEntityByHandle<Rage.Entity>(entityHandle);
-
-                            }
+                            entityPlayerAimingAtSneakyRobber = GetEntityPlayerAimsAt();
                         }
                         catch (Exception e)
                         {
-
                         }
+
                         if (entityPlayerAimingAtSneakyRobber == sneakyrobber)
                         {
                             break;
                         }
                         if (RescuingHostage) { break; }
                     }
+
+
                     if (sneakyrobber.Exists())
                     {
                         sneakyrobber.Tasks.FightAgainstClosestHatedTarget(15f);
                         sneakyrobber.RelationshipGroup = "ROBBERS";
                     }
+
                     while (CalloutRunning)
                     {
-
                         GameFiber.Yield();
+
                         if (!sneakyrobber.Exists()) { break; }
                         if (!nearestPed.Exists()) { break; }
+
                         Rage.Native.NativeFunction.Natives.STOP_CURRENT_PLAYING_AMBIENT_SPEECH(sneakyrobber);
+
                         if (nearestPed.IsDead)
                         {
                             foreach (Ped hostage in SpawnedHostages)
@@ -1146,8 +1787,6 @@ namespace AssortedCallouts.Callouts
                                 {
                                     if (Vector3.Distance(hostage.Position, sneakyrobber.Position) < 14f)
                                     {
-
-
                                         int waitCount = 0;
                                         while (hostage.IsAlive)
                                         {
@@ -1163,18 +1802,17 @@ namespace AssortedCallouts.Callouts
                                     }
                                 }
                             }
-
                             break;
-
                         }
 
-                        if (sneakyrobber.IsDead) { break; }
-
+                        if (sneakyrobber.IsDead)
+                        {
+                            break;
+                        }
                     }
                 }
                 catch (Exception e)
                 {
-
                 }
                 finally
                 {
@@ -1182,48 +1820,247 @@ namespace AssortedCallouts.Callouts
                 }
             });
         }
+
+        private const float DIST_ACTIVATE_VAULT_ROBBERS = 4f;
+        //STATUS: refactored, review
         private void HandleVaultRobbers()
         {
-            GameFiber.StartNew(delegate
+            if (DistToPlayer(OutsideBankVault) < DIST_ACTIVATE_VAULT_ROBBERS)
             {
-                while (CalloutRunning)
+                GameFiber.Wait(2000);
+
+                VaultRobbers[2].Instance.Tasks.FollowNavigationMeshToPosition(OutsideBankVault, VaultRobbers[2].Instance.Heading, 2f).WaitForCompletion(500);
+
+                World.SpawnExplosion(new Vector3(252.2609f, 225.3824f, 101.6835f), 2, 0.2f, true, false, 0.6f);
+
+                CurrentAudioState = AudioState.Alarm;
+                AudioStateChanged = true;
+
+                GameFiber.Wait(900);
+
+                VaultRobbers.ForEach(r => r.Instance.Tasks.FightAgainstClosestHatedTarget(23f));
+
+                GameFiber.Wait(3000);
+
+                VaultRobbers.ForEach(r => Robbers.Add(r.Instance));
+
+                proc.DeactivateProcess(HandleVaultRobbers);
+            }
+        }
+                       
+        //HOSTAGES=======================================================================================
+
+
+        private Ped closeHostage;
+        private int subtitleCount;
+        //STATUS: refactored, review
+        private void HandleEndangeredHostages()
+        {
+            for (int i = Hostages.Count - 1; i >= 0; i--)
+            {
+                var hostage = Hostages[i].Instance;
+
+                if (!hostage.Exists() || !hostage.IsAlive)
                 {
-                    GameFiber.Yield();
-                    try
+                    Hostages.RemoveAt(i);
+                    AliveHostagesCount--;
+                    continue;
+                }
+
+                if (Functions.IsPedGettingArrested(hostage) || Functions.IsPedArrested(hostage))
+                {
+                    Hostages[i].Instance = hostage.ClonePed();
+                }
+
+                hostage.Tasks.PlayAnimation("random@arrests", "kneeling_arrest_idle", 1f, AnimationFlags.Loop);
+
+                if (Player.IsShooting) continue;
+                
+                if (DistToPlayer(hostage.Position) < 1.45f)
+                {
+                    if (ExtensionMethods.IsKeyDownRightNowComputerCheck(AssortedCalloutsHandler.HostageRescueKey))
                     {
-                        if (Vector3.Distance(Game.LocalPlayer.Character.Position, OutsideBankVault) < 4f)
+                        Vector3 directionFromPlayerToHostage = (hostage.Position - Game.LocalPlayer.Character.Position);
+                        directionFromPlayerToHostage.Normalize();
+                        RescuingHostage = true;
+
+                        Player.Tasks.AchieveHeading(MathHelper.ConvertDirectionToHeading(directionFromPlayerToHostage)).WaitForCompletion(1200);
+                        hostage.RelationshipGroup = "COP";
+
+                        SpeechHandler.HandleBankHeistSpeech(new List<string>() { "You: Come on! It's safe, get to the ambulance outside!" }, WaitAfterLastLine: false);
+                        Player.Tasks.PlayAnimation("random@rescue_hostage", "bystander_helping_girl_loop", 1.5f, AnimationFlags.None).WaitForCompletion(3000);
+
+                        if (hostage.IsAlive)
                         {
-                            GameFiber.Wait(2000);
+                            hostage.Tasks.PlayAnimation("random@arrests", "kneeling_arrest_get_up", 0.9f, AnimationFlags.None).WaitForCompletion(6000);
+                            Player.Tasks.ClearImmediately();
 
-                            RobbersVault[2].Tasks.FollowNavigationMeshToPosition(OutsideBankVault, RobbersVault[2].Heading, 2f).WaitForCompletion(500);
-                            World.SpawnExplosion(new Vector3(252.2609f, 225.3824f, 101.6835f), 2, 0.2f, true, false, 0.6f);
-                            CurrentAudioState = AudioState.Alarm;
-                            AudioStateChanged = true;
-                            GameFiber.Wait(900);
-                            foreach (Ped vaultrobber in RobbersVault)
-                            {
-                                vaultrobber.Tasks.FightAgainstClosestHatedTarget(23f);
+                            hostage.Tasks.FollowNavigationMeshToPosition(HostageSafeLocation, HostageSafeHeading, 1.55f);
 
-                            }
-                            GameFiber.Wait(3000);
-                            foreach (Ped vaultrobber in RobbersVault)
-                            {
-                                Robbers.Add(vaultrobber);
-                            }
-                            break;
+                            RescuedHostages.Add(Hostages[i]);
+                            Hostages.RemoveAt(i);
+                        }
+                        else
+                        {
+                            Player.Tasks.ClearImmediately();
+                        }
+
+                        RescuingHostage = false;
+                    }
+                    else
+                    {
+                        subtitleCount++;
+                        closeHostage = hostage;
+
+                        if (subtitleCount > 10)
+                        {
+                            Game.DisplaySubtitle("~s~Hold ~b~" + AssortedCalloutsHandler.kc.ConvertToString(AssortedCalloutsHandler.HostageRescueKey) + " ~s~to release the hostage.", 500);
                         }
                     }
-                    catch (Exception e)
+                }
+                else
+                {
+                    if (hostage == closeHostage)
                     {
-                        Game.LogTrivial(e.ToString());
+                        subtitleCount = 0;
                     }
                 }
-            });
+            }
         }
+
+        int waitCountForceAttack = 0;
+        //STATUS: refactored, review
+        private void HandleRescuedHostages()
+        {
+            if (waitCountForceAttack > 250)
+            {
+                waitCountForceAttack = 0;
+            }
+
+            for (int i = RescuedHostages.Count - 1; i >= 0; i--)
+            {
+                var rescuedHostage = RescuedHostages[i].Instance;
+                
+                if (rescuedHostage.Exists() && rescuedHostage.IsAlive)
+                {
+                    if (Hostages.Any(h => h.Instance == rescuedHostage))
+                    {
+                        Hostages.RemoveAll(h => h.Instance == rescuedHostage);
+                    }
+
+                    if (Vector3.Distance(rescuedHostage.Position, HostageSafeLocation) < 3f)
+                    {
+                        SafeHostages.Add(RescuedHostages[i]);
+                        SafeHostagesCount++;
+                    }
+
+                    if (Functions.IsPedGettingArrested(rescuedHostage) || Functions.IsPedArrested(rescuedHostage))
+                    {
+                        RescuedHostages[i].Instance = rescuedHostage.ClonePed();
+                    }
+
+                    rescuedHostage.Tasks.FollowNavigationMeshToPosition(HostageSafeLocation, HostageSafeHeading, 1.55f).WaitForCompletion(200);
+
+                    if (waitCountForceAttack > 150)
+                    {
+                        Ped nearestPed = rescuedHostage.GetNearbyPeds(2)[0];
+                        if (nearestPed == Game.LocalPlayer.Character)
+                        {
+                            nearestPed = rescuedHostage.GetNearbyPeds(2)[1];
+                        }
+
+                        if (Robbers.Contains(nearestPed))
+                        {
+                            nearestPed.Tasks.FightAgainst(rescuedHostage);
+                            waitCountForceAttack = 0;
+                        }
+                    }
+                }
+                else
+                {
+                    RescuedHostages.RemoveAt(i);
+                    AliveHostagesCount--;
+                }
+            }
+        }
+
+        int deleteSafeHostageCount = 0;
+        int enterAmbulanceCount = 0;
+        //STATUS: refactored, review
+        private void HandleSafeHostages()
+        {
+            if (enterAmbulanceCount > 101)
+            {
+                enterAmbulanceCount = 101;
+            }
+
+            for (int i = SafeHostages.Count - 1; i >= 0; i--)
+            {
+                var safeHostage = SafeHostages[i].Instance;
+
+                if (!safeHostage.Exists())
+                {
+                    SafeHostages.RemoveAt(i);
+                    continue;
+                }
+
+                if (RescuedHostages.Contains(SafeHostages[i]))
+                {
+                    RescuedHostages.Remove(SafeHostages[i]);
+                }
+
+                safeHostage.IsInvincible = true;
+
+                if (!safeHostage.IsInAnyVehicle(true))
+                {
+                    if (enterAmbulanceCount > 100)
+                    {
+                        var ambo = Ambulances[1].Instance;
+
+                        if (ambo.IsSeatFree(2))
+                        {
+                            safeHostage.Tasks.EnterVehicle(ambo, 2);
+                        }
+                        else if (ambo.IsSeatFree(1))
+                        {
+                            safeHostage.Tasks.EnterVehicle(ambo, 1);
+                        }
+                        else
+                        {
+                            ambo.GetPedOnSeat(2).Delete();
+                            safeHostage.Tasks.EnterVehicle(ambo, 2);
+                        }
+
+                        enterAmbulanceCount = 0;
+                    }
+                }
+                else
+                {
+                    deleteSafeHostageCount++;
+                    if (deleteSafeHostageCount > 50)
+                    {
+                        if (DistToPlayer(safeHostage.Position) > 22f)
+                        {
+                            if (safeHostage.IsInAnyVehicle(false))
+                            {
+                                safeHostage.Delete();
+
+                                deleteSafeHostageCount = 0;
+                                Rage.Native.NativeFunction.Natives.SET_VEHICLE_DOORS_SHUT(Ambulances[1].Instance, true);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         private bool RescuingHostage = false;
+        //STATUS: old f()
+        [Obsolete("Replaced by refactored functions")]
         private void HandleHostages()
         {
             Game.FrameRender += DrawHostageCount;
+
             GameFiber.StartNew(delegate
             {
                 int waitCountForceAttack = 0;
@@ -1247,8 +2084,12 @@ namespace AssortedCallouts.Callouts
                         {
                             enterAmbulanceCount = 101;
                         }
-                        foreach (Ped hostage in SpawnedHostages)
+
+                        //TODO: use dedicated hostage class
+                        foreach (var h in Hostages)
                         {
+                            var hostage = h.Instance;
+
                             GameFiber.Yield();
                             if (hostage.Exists())
                             {
@@ -1261,7 +2102,7 @@ namespace AssortedCallouts.Callouts
                                     hostage.Tasks.PlayAnimation("random@arrests", "kneeling_arrest_idle", 1f, AnimationFlags.Loop);
                                     if (!Game.LocalPlayer.Character.IsShooting)
                                     {
-                                        if (Vector3.Distance(hostage.Position, Game.LocalPlayer.Character.Position) < 1.45f)
+                                        if (DistToPlayer(hostage.Position) < 1.45f)
                                         {
                                             if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownRightNowComputerCheck(AssortedCalloutsHandler.HostageRescueKey))
                                             {
@@ -1277,6 +2118,7 @@ namespace AssortedCallouts.Callouts
                                                 {
                                                     hostage.Tasks.PlayAnimation("random@arrests", "kneeling_arrest_get_up", 0.9f, AnimationFlags.None).WaitForCompletion(6000);
                                                     Game.LocalPlayer.Character.Tasks.ClearImmediately();
+
                                                     if (hostage.IsAlive)
                                                     {
                                                         hostage.Tasks.FollowNavigationMeshToPosition(HostageSafeLocation, HostageSafeHeading, 1.55f);
@@ -1294,7 +2136,6 @@ namespace AssortedCallouts.Callouts
                                                     Game.LocalPlayer.Character.Tasks.ClearImmediately();
                                                 }
                                                 RescuingHostage = false;
-
                                             }
                                             else
                                             {
@@ -1303,7 +2144,6 @@ namespace AssortedCallouts.Callouts
 
                                                 if (subtitleCount > 10)
                                                 {
-
                                                     Game.DisplaySubtitle("~s~Hold ~b~" + AssortedCalloutsHandler.kc.ConvertToString(AssortedCalloutsHandler.HostageRescueKey) + " ~s~to release the hostage.", 500);
                                                 }
                                             }
@@ -1316,7 +2156,6 @@ namespace AssortedCallouts.Callouts
                                             }
                                         }
                                     }
-
                                 }
                                 else
                                 {
@@ -1330,9 +2169,10 @@ namespace AssortedCallouts.Callouts
                                 AliveHostagesCount--;
                             }
                         }
+
+
                         foreach (Ped rescuedHostage in RescuedHostages)
                         {
-
                             if (rescuedHostage.Exists() && rescuedHostage.IsAlive)
                             {
                                 if (SpawnedHostages.Contains(rescuedHostage))
@@ -1372,78 +2212,73 @@ namespace AssortedCallouts.Callouts
                                 AliveHostagesCount--;
                             }
                         }
+
                         foreach (Ped safeHostage in SafeHostages)
                         {
-                            if (safeHostage.Exists())
+                            if(!safeHostage.Exists())
                             {
-                                if (RescuedHostages.Contains(safeHostage))
-                                {
-                                    RescuedHostages.Remove(safeHostage);
-                                }
-                                safeHostage.IsInvincible = true;
-                                if (!safeHostage.IsInAnyVehicle(true))
-                                {
+                                SafeHostages.Remove(safeHostage);
+                                continue;
+                            }
 
-                                    if (enterAmbulanceCount > 100)
+                            if (RescuedHostages.Contains(safeHostage))
+                            {
+                                RescuedHostages.Remove(safeHostage);
+                            }
+
+                            safeHostage.IsInvincible = true;
+
+                            if (!safeHostage.IsInAnyVehicle(true))
+                            {
+                                if (enterAmbulanceCount > 100)
+                                {
+                                    var ambo = Ambulances[1].Instance;
+
+                                    if (ambo.IsSeatFree(2))
                                     {
-                                        if (AmbulancesList[1].IsSeatFree(2))
-                                        {
-                                            safeHostage.Tasks.EnterVehicle(AmbulancesList[1], 2);
-
-                                        }
-                                        else if (AmbulancesList[1].IsSeatFree(1))
-                                        {
-                                            safeHostage.Tasks.EnterVehicle(AmbulancesList[1], 1);
-
-                                        }
-                                        else
-                                        {
-                                            AmbulancesList[1].GetPedOnSeat(2).Delete();
-                                            safeHostage.Tasks.EnterVehicle(AmbulancesList[1], 2);
-
-                                        }
-
-                                        enterAmbulanceCount = 0;
+                                        safeHostage.Tasks.EnterVehicle(ambo, 2);
                                     }
-                                }
-                                else
-                                {
-                                    deleteSafeHostageCount++;
-                                    if (deleteSafeHostageCount > 50)
+                                    else if (ambo.IsSeatFree(1))
                                     {
-                                        if (Vector3.Distance(Game.LocalPlayer.Character.Position, safeHostage.Position) > 22f)
-                                        {
-                                            if (safeHostage.IsInAnyVehicle(false))
-                                            {
-
-                                                safeHostage.Delete();
-
-                                                deleteSafeHostageCount = 0;
-                                                Rage.Native.NativeFunction.Natives.SET_VEHICLE_DOORS_SHUT(AmbulancesList[1], true);
-                                            }
-                                        }
+                                        safeHostage.Tasks.EnterVehicle(ambo, 1);
                                     }
-                                }
+                                    else
+                                    {
+                                        ambo.GetPedOnSeat(2).Delete();
+                                        safeHostage.Tasks.EnterVehicle(ambo, 2);
+                                    }
 
+                                    enterAmbulanceCount = 0;
+                                }
                             }
                             else
                             {
-                                SafeHostages.Remove(safeHostage);
+                                deleteSafeHostageCount++;
+                                if (deleteSafeHostageCount > 50)
+                                {
+                                    if (DistToPlayer(safeHostage.Position) > 22f)
+                                    {
+                                        if (safeHostage.IsInAnyVehicle(false))
+                                        {
+                                            safeHostage.Delete();
+
+                                            deleteSafeHostageCount = 0;
+                                            Rage.Native.NativeFunction.Natives.SET_VEHICLE_DOORS_SHUT(Ambulances[1].Instance, true);
+                                        }
+                                    }
+                                }
                             }
                         }
-
-
-
                     }
                     catch (Exception e) { continue; }
                 }
             });
         }
-        private void DrawHostageCount(System.Object sender, Rage.GraphicsEventArgs e)
+        //STATUS: review
+        private void DrawHostageCount(object sender, GraphicsEventArgs e)
         {
             if (fighting || (SurrenderComplete && TalkedToWells2nd))
             {
-
                 e.Graphics.DrawText("Hostages Rescued: " + SafeHostagesCount.ToString() + "/" + AliveHostagesCount.ToString(), "Aharoni Bold", 20.0f, new PointF(1, 6), Color.LightBlue);
                 if (TotalHostagesCount - AliveHostagesCount > 0)
                 {
@@ -1454,236 +2289,168 @@ namespace AssortedCallouts.Callouts
             {
                 Game.FrameRender -= DrawHostageCount;
             }
-
         }
-        private enum AudioState { Alarm, None };
+        //STATUS: review
         private void HandleAudio()
         {
-
-
-            GameFiber.StartNew(delegate
+            //TODO: refactor CurrentAudioState - looks like some of vars used here can be removed?
+            if (!HandlingRespawn)
             {
-
-                CurrentAudioState = AudioState.None;
-
-                while (CalloutRunning)
+                if (!AlarmPlaying && DistToPlayer(SpawnPoint) < DIST_PLAY_BANK_ALARM_ON)
                 {
-                    try
-                    {
-                        GameFiber.Yield();
-                        if (!HandlingRespawn)
-                        {
-
-                            if (!AlarmPlaying)
-                            {
-                                if (Vector3.Distance(Game.LocalPlayer.Character.Position, SpawnPoint) < 55f)
-                                {
-                                    AlarmPlaying = true;
-                                    CurrentAudioState = AudioState.Alarm;
-                                    SuspectBlip.IsRouteEnabled = false;
-                                    AudioStateChanged = true;
-                                }
-                            }
-                            else
-                            {
-                                if (Vector3.Distance(Game.LocalPlayer.Character.Position, SpawnPoint) > 70f)
-                                {
-                                    AlarmPlaying = false;
-                                    CurrentAudioState = AudioState.None;
-                                    SuspectBlip.IsRouteEnabled = true;
-                                    AudioStateChanged = true;
-                                }
-                            }
-
-
-
-                            if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.ToggleAlarmKey))
-                            {
-                                if (CurrentAudioState != AudioState.None)
-                                {
-                                    CurrentAudioState += 1;
-                                }
-                                else
-                                {
-                                    CurrentAudioState = AudioState.Alarm;
-                                }
-                                AudioStateChanged = true;
-
-                            }
-
-                            if (AudioStateChanged)
-                            {
-                                switch (CurrentAudioState)
-                                {
-                                    case AudioState.Alarm:
-
-                                        AlarmPlayer.PlayLooping();
-                                        break;
-
-                                    case AudioState.None:
-                                        AlarmPlayer.Stop();
-
-                                        break;
-                                }
-                                AudioStateChanged = false;
-                            }
-
-
-                        }
-                    }
-                    catch (Exception e)
-                    {
-                        Game.LogTrivial(e.ToString());
-                    }
+                    AlarmPlaying = true;
+                    CurrentAudioState = AudioState.Alarm;
+                    SuspectBlip.IsRouteEnabled = false;
+                    AudioStateChanged = true;
+                }
+                else if (DistToPlayer(SpawnPoint) > DIST_PLAY_BANK_ALARM_OFF)
+                {
+                    AlarmPlaying = false;
+                    CurrentAudioState = AudioState.None;
+                    SuspectBlip.IsRouteEnabled = true;
+                    AudioStateChanged = true;
                 }
 
-            });
+                if (ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.ToggleAlarmKey))
+                {
+                    if (CurrentAudioState != AudioState.None)
+                    {
+                        CurrentAudioState += 1;
+                    }
+                    else
+                    {
+                        CurrentAudioState = AudioState.Alarm;
+                    }
+
+                    AudioStateChanged = true;
+                }
+
+                if (AudioStateChanged)
+                {
+                    switch (CurrentAudioState)
+                    {
+                        case AudioState.Alarm:
+                            AlarmPlayer.PlayLooping();
+                            break;
+
+                        case AudioState.None:
+                            AlarmPlayer.Stop();
+                            break;
+                    }
+
+                    AudioStateChanged = false;
+                }
+            }
         }
 
+        private int RiotVan_CoolDown = 0;
+        //STATUS: refactored, review
         private void HandleOpenBackRiotVan()
         {
-            GameFiber.StartNew(delegate
-            {
-                int CoolDown = 0;
-                while (CalloutRunning)
-                {
-                    try
-                    {
-                        GameFiber.Yield();
-                        if (CoolDown > 0) { CoolDown--; }
-                        if (HandlingRespawn) { CoolDown = 0; }
+            if (RiotVan_CoolDown > 0) { RiotVan_CoolDown--; }
+            if (HandlingRespawn) { RiotVan_CoolDown = 0; }
 
-                        if (Vector3.Distance(RiotVans[0].GetOffsetPosition(Vector3.RelativeBack * 4f), Game.LocalPlayer.Character.Position) < 2f)
-                        {
-
-                            if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownRightNowComputerCheck(System.Windows.Forms.Keys.Enter))
-                            {
-                                if (CoolDown > 0)
-                                {
-                                    Game.DisplayNotification("The gear has temporarily run out.");
-                                }
-                                else
-                                {
-                                    CoolDown = 3500;
-                                    Game.LocalPlayer.Character.Tasks.EnterVehicle(RiotVans[0], 1).WaitForCompletion();
-                                    Game.LocalPlayer.Character.Armor = 100;
-                                    Game.LocalPlayer.Character.Health = Game.LocalPlayer.Character.MaxHealth;
-                                    Game.LocalPlayer.Character.Inventory.GiveNewWeapon(new WeaponAsset("WEAPON_CARBINERIFLE"), 150, true);
-
-                                    Game.LocalPlayer.Character.Inventory.GiveNewWeapon(new WeaponAsset(Grenades[1]), 3, false);
-                                    Rage.Native.NativeFunction.Natives.PLAY_SOUND_FRONTEND(-1, "PURCHASE", "HUD_LIQUOR_STORE_SOUNDSET", 1);
-                                    Game.LocalPlayer.Character.Tasks.LeaveVehicle(LeaveVehicleFlags.None).WaitForCompletion();
-                                    FightingPacksUsed++;
-                                }
-
-                            }
-                            else
-                            {
-                                if (CoolDown == 0)
-                                {
-                                    Game.DisplaySubtitle("~h~Press ~b~Enter ~s~to retrieve gear from the van.", 500);
-                                }
-                            }
-                        }
-                        else if (Vector3.Distance(RiotVans[1].GetOffsetPosition(Vector3.RelativeBack * 4f), Game.LocalPlayer.Character.Position) < 2f)
-                        {
-
-                            if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownRightNowComputerCheck(System.Windows.Forms.Keys.Enter))
-                            {
-                                if (CoolDown > 0)
-                                {
-                                    Game.DisplayNotification("The gear has temporarily run out.");
-                                }
-                                else
-                                {
-                                    CoolDown = 3500;
-                                    Game.LocalPlayer.Character.Tasks.EnterVehicle(RiotVans[1], 1).WaitForCompletion();
-                                    Game.LocalPlayer.Character.Armor = 100;
-                                    Game.LocalPlayer.Character.Health = Game.LocalPlayer.Character.MaxHealth;
-                                    Game.LocalPlayer.Character.Inventory.GiveNewWeapon(new WeaponAsset("WEAPON_CARBINERIFLE"), 150, true);
-
-                                    Game.LocalPlayer.Character.Inventory.GiveNewWeapon(new WeaponAsset(Grenades[1]), 3, false);
-                                    Rage.Native.NativeFunction.Natives.PLAY_SOUND_FRONTEND(-1, "PURCHASE", "HUD_LIQUOR_STORE_SOUNDSET", 1);
-                                    Game.LocalPlayer.Character.Tasks.LeaveVehicle(LeaveVehicleFlags.None).WaitForCompletion();
-                                    FightingPacksUsed++;
-                                }
-                            }
-                            else
-                            {
-                                if (CoolDown == 0)
-                                {
-                                    Game.DisplaySubtitle("~h~Press ~b~Enter ~s~to retrieve gear from the van.", 500);
-                                }
-                            }
-                        }
-
-                    }
-                    catch (Exception e) { }
-                }
-            });
+            RiotVans.ForEach(v => RiotVanEQHandler(v, RiotVan_CoolDown));
         }
+        //STATUS: refactored, review
+        private void RiotVanEQHandler(Vehicle riotVan, int coolDown)
+        {
+            if (DistToPlayer(riotVan.GetOffsetPosition(Vector3.RelativeBack * 4f)) < 2f)
+            {
+                if (ExtensionMethods.IsKeyDownRightNowComputerCheck(Keys.Enter))
+                {
+                    if (coolDown > 0)
+                    {
+                        Game.DisplayNotification("The gear has temporarily run out.");
+                    }
+                    else
+                    {
+                        coolDown = 3500;
+                        Player.Tasks.EnterVehicle(RiotVans[0], 1).WaitForCompletion();
+                        Player.Armor = 100;
+                        Player.Health = Player.MaxHealth;
+                        Player.Inventory.GiveNewWeapon(new WeaponAsset("WEAPON_CARBINERIFLE"), 150, true);
+
+                        Player.Inventory.GiveNewWeapon(new WeaponAsset(Grenades[1]), 3, false);
+                        Rage.Native.NativeFunction.Natives.PLAY_SOUND_FRONTEND(-1, "PURCHASE", "HUD_LIQUOR_STORE_SOUNDSET", 1);
+                        Player.Tasks.LeaveVehicle(LeaveVehicleFlags.None).WaitForCompletion();
+                        FightingPacksUsed++;
+                    }
+                }
+                else
+                {
+                    if (coolDown == 0)
+                    {
+                        Game.DisplaySubtitle("~h~Press ~b~Enter ~s~to retrieve gear from the van.", 500);
+                    }
+                }
+            }
+        }
+
         private Entity entityPlayerAimingAt;
+        //STATUS: refactor, extract specialized f()
+        [Obsolete("Refactor, use eg. HandleMinigunRobberBehavior")]
         private void RobbersFightingAI()
         {
             GameFiber.StartNew(delegate
             {
-
                 while (CalloutRunning)
                 {
-
                     try
                     {
                         GameFiber.Yield();
+
                         if (fighting)
                         {
                             foreach (Ped robber in Robbers)
                             {
                                 GameFiber.Yield();
-                                if (robber.Exists())
-                                {
-                                    float Distance;
-                                    if (Vector3.Distance(robber.Position, PacificBankInsideChecks[0]) < Vector3.Distance(robber.Position, PacificBankInsideChecks[1]))
-                                    {
-                                        Distance = Vector3.Distance(robber.Position, PacificBankInsideChecks[0]);
-                                    }
-                                    else
-                                    {
-                                        Distance = Vector3.Distance(robber.Position, PacificBankInsideChecks[1]);
-                                    }
 
-                                    if (Distance < 16.5f) { Distance = 16.5f; }
-                                    else if (Distance > 21f) { Distance = 21f; }
-                                    robber.RegisterHatedTargetsAroundPed(Distance);
-                                    robber.Tasks.FightAgainstClosestHatedTarget(Distance);
-                                    //Rage.Native.NativeFunction.CallByName<uint>("TASK_GUARD_CURRENT_POSITION", robber, 10.0f, 10.0f, true);
-                                }
+                                if (!robber.Exists()) continue; //TODO: remove from list
+
+                                float distCheck0 = Vector3.Distance(robber.Position, PacificBankInsideChecks[0]);
+                                float distCheck1 = Vector3.Distance(robber.Position, PacificBankInsideChecks[1]);
+
+                                float Distance = Math.Min(distCheck0, distCheck1);
+
+                                if (Distance < 16.5f) Distance = 16.5f;
+                                else if (Distance > 21f) Distance = 21f;
+
+                                robber.RegisterHatedTargetsAroundPed(Distance);
+                                robber.Tasks.FightAgainstClosestHatedTarget(Distance);
                             }
+
                             if (MiniGunRobber.Exists())
                             {
-                                if (Vector3.Distance(Game.LocalPlayer.Character.Position, MiniGunFireLocation) < Vector3.Distance(Game.LocalPlayer.Character.Position, BehindGlassDoorLocation))
+                                var distPlayerToMinigun = DistToPlayer(MiniGunFireLocation);
+                                var distPlayerGlassDoor = DistToPlayer(BehindGlassDoorLocation);
+
+
+                                if (distPlayerToMinigun < distPlayerGlassDoor)
                                 {
-                                    if (Vector3.Distance(MiniGunFireLocation, Game.LocalPlayer.Character.Position) < 4.7f)
+                                    if (distPlayerToMinigun < 4.7f)
                                     {
                                         MiniGunRobberFiring = true;
 
                                     }
-                                    else if (Vector3.Distance(MiniGunFireLocation, Game.LocalPlayer.Character.Position) > 12f)
+                                    else if (distPlayerToMinigun > 12f)
                                     {
                                         MiniGunRobberFiring = false;
                                     }
-
+                                    //TODO: what if 4.7 < d < 12 => keeps shootin' or stays low
                                 }
                                 else
                                 {
-                                    if (Vector3.Distance(Game.LocalPlayer.Character.Position, BehindGlassDoorLocation) < 2.1f)
+                                    if (distPlayerGlassDoor < 2.1f)
                                     {
                                         MiniGunRobberFiring = true;
                                     }
-                                    else if (Vector3.Distance(Game.LocalPlayer.Character.Position, BehindGlassDoorLocation) > 6f)
+                                    else if (distPlayerGlassDoor > 6f)
                                     {
                                         MiniGunRobberFiring = false;
                                     }
                                 }
+
                                 if (MiniGunRobberFiring)
                                 {
 
@@ -1694,18 +2461,11 @@ namespace AssortedCallouts.Callouts
                                     MiniGunRobber.Tasks.FollowNavigationMeshToPosition(MiniGunRobberLocation, MiniGunRobberHeading, 2f);
 
                                 }
-
                             }
 
                             try
                             {
-                                unsafe
-                                {
-                                    uint entityHandle;
-                                    NativeFunction.Natives.x2975C866E6713290(Game.LocalPlayer, new IntPtr(&entityHandle)); // Stores the entity the player is aiming at in the uint provided in the second parameter.
-
-                                    entityPlayerAimingAt = World.GetEntityByHandle<Rage.Entity>(entityHandle);
-                                }
+                                entityPlayerAimingAt = GetEntityPlayerAimsAt();
                             }
                             catch (Exception e) { Game.LogTrivial(e.ToString()); }
 
@@ -1715,9 +2475,9 @@ namespace AssortedCallouts.Callouts
                                 Ped pedAimingAt = (Ped)entityPlayerAimingAt;
                                 pedAimingAt.Tasks.FightAgainst(Game.LocalPlayer.Character);
                             }
+
                             GameFiber.Sleep(3000);
                         }
-
                     }
                     catch (Exception e)
                     {
@@ -1727,646 +2487,215 @@ namespace AssortedCallouts.Callouts
             });
 
         }
+        //STATUS: refactored, review
+        private void HandleRobberMinigunBehavior()
+        {
+            if (!MiniGunRobber.Exists()) return; //TODO: disable proc
+
+            var distPlayerToMinigun = DistToPlayer(MiniGunFireLocation);
+            var distPlayerGlassDoor = DistToPlayer(BehindGlassDoorLocation);
+
+            if (distPlayerToMinigun < distPlayerGlassDoor)
+            {
+                if (distPlayerToMinigun < 4.7f)
+                {
+                    MiniGunRobberFiring = true;
+
+                }
+                else if (distPlayerToMinigun > 12f)
+                {
+                    MiniGunRobberFiring = false;
+                }
+            }
+            else
+            {
+                if (distPlayerGlassDoor < 2.1f)
+                {
+                    MiniGunRobberFiring = true;
+                }
+                else if (distPlayerGlassDoor > 6f)
+                {
+                    MiniGunRobberFiring = false;
+                }
+            }
+
+            if (MiniGunRobberFiring)
+            {
+
+                Rage.Native.NativeFunction.Natives.TASK_SHOOT_AT_ENTITY(MiniGunRobber, Game.LocalPlayer.Character, 2700, Game.GetHashKey("FIRING_PATTERN_FULL_AUTO"));
+            }
+            else
+            {
+                MiniGunRobber.Tasks.FollowNavigationMeshToPosition(MiniGunRobberLocation, MiniGunRobberHeading, 2f);
+
+            }
+        }
+        //STATUS: review, add try..catch and return null in case of an exception
+        private Entity GetEntityPlayerAimsAt()
+        {
+            unsafe
+            {
+                uint entityHandle;
+                NativeFunction.Natives.x2975C866E6713290(Game.LocalPlayer, new IntPtr(&entityHandle)); // Stores the entity the player is aiming at in the uint provided in the second parameter.
+
+                return World.GetEntityByHandle<Entity>(entityHandle);
+            }
+        }
 
         private GameFiber CopFightingAIGameFiber;
+        //STATUS: to be refactored
         private void CopFightingAI()
         {
             CopFightingAIGameFiber = GameFiber.StartNew(delegate
             {
-
                 while (CalloutRunning)
                 {
-                    try
+                    GameFiber.Yield();
+
+                    if (fighting)
                     {
-                        GameFiber.Yield();
-
-                        if (fighting)
+                        if (PoliceOfficersTargetsToShoot.Count > 0)
                         {
-                            if (PoliceOfficersTargetsToShoot.Count > 0)
+                            var target = PoliceOfficersTargetsToShoot[0];
+
+                            if (target.Exists() && target.IsAlive)
                             {
-                                if (PoliceOfficersTargetsToShoot[0].Exists())
-                                {
-                                    if (PoliceOfficersTargetsToShoot[0].IsAlive)
-                                    {
-                                        foreach (Ped cop in PoliceOfficersSpawned)
-                                        {
-
-                                            cop.Tasks.FightAgainst(PoliceOfficersTargetsToShoot[0]);
-                                        }
-                                    }
-                                    else
-                                    {
-                                        PoliceOfficersTargetsToShoot.RemoveAt(0);
-                                    }
-                                }
-                                else
-                                {
-                                    PoliceOfficersTargetsToShoot.RemoveAt(0);
-                                }
-
+                                PoliceOfficersSpawned.ForEach(p => p.Tasks.FightAgainst(target));
                             }
                             else
                             {
-                                CopsReturnToLocation();
+                                PoliceOfficersTargetsToShoot.RemoveAt(0);
                             }
                         }
-                        if (fighting || SWATFollowing)
+                        else
                         {
-                            foreach (Ped cop in SWATTeam1)
-                            {
-                                GameFiber.Yield();
-                                if (cop.Exists())
-                                {
-                                    if (!SWATFollowing)
-                                    {
-                                        cop.RegisterHatedTargetsAroundPed(60f);
-                                        cop.Tasks.FightAgainstClosestHatedTarget(60f);
-                                    }
-                                    else
-                                    {
-                                        if (Math.Abs(Game.LocalPlayer.Character.Position.Z - cop.Position.Z) > 1f)
-                                        {
-                                            cop.Tasks.FollowNavigationMeshToPosition(Game.LocalPlayer.Character.Position, Game.LocalPlayer.Character.Heading, 1.6f, 1f);
-                                        }
-                                        else
-                                        {
-                                            cop.Tasks.FollowNavigationMeshToPosition(Game.LocalPlayer.Character.Position, Game.LocalPlayer.Character.Heading, 1.6f, 4f);
-                                        }
-                                    }
-                                }
-                            }
-                            foreach (Ped cop in SWATTeam2)
-                            {
-                                GameFiber.Yield();
-                                if (cop.Exists())
-                                {
-                                    if (!SWATFollowing)
-                                    {
-                                        cop.RegisterHatedTargetsAroundPed(60f);
-                                        cop.Tasks.FightAgainstClosestHatedTarget(60f);
-                                    }
-                                    else
-                                    {
-                                        if (Math.Abs(Game.LocalPlayer.Character.Position.Z - cop.Position.Z) > 1f)
-                                        {
-                                            cop.Tasks.FollowNavigationMeshToPosition(Game.LocalPlayer.Character.Position, Game.LocalPlayer.Character.Heading, 1.6f, 1f);
-                                        }
-                                        else
-                                        {
-                                            cop.Tasks.FollowNavigationMeshToPosition(Game.LocalPlayer.Character.Position, Game.LocalPlayer.Character.Heading, 1.6f, 4f);
-                                        }
-                                    }
-                                }
-                            }
-                            GameFiber.Sleep(4000);
+                            CopsReturnToLocation();
                         }
-
-
                     }
 
-                    catch (Exception e) { }
+                    if (fighting || SWATFollowing)
+                    {
+                        foreach (var op in SWATOperators)
+                        {
+                            if (!op.Instance.Exists()) continue;
+
+                            if(!SWATFollowing)
+                            {
+                                op.Instance.RegisterHatedTargetsAroundPed(60f);
+                                op.Instance.Tasks.FightAgainstClosestHatedTarget(60f);
+                            }
+                            else
+                            {
+                                op.Instance.Tasks.FollowNavigationMeshToPosition(PlayerPosition, Player.Heading, 1.6f, GetDistTresholdForCops(op.Instance));
+                            }
+                        }
+
+                        GameFiber.Sleep(4000);
+                    }
                 }
             });
         }
-        private Vector3 DoorSide1 = new Vector3(265.542f, 217.4402f, 110.283f);
-        private Vector3 DoorSide2 = new Vector3(265.8473f, 218.1096f, 110.283f);
-
-
-        private void CalloutHandler()
+        //STATUS: done
+        private float GetDistTresholdForCops(Ped cop)
         {
-            CalloutRunning = true;
-            GameFiber.StartNew(delegate
-            {
-                try
-                {
-                    SuspectBlip = new Blip(PacificBank);
-                    SideDoorBlip = new Blip(new Vector3(258.3625f, 200.4897f, 104.9758f));
-                    SuspectBlip.IsRouteEnabled = true;
-                    GameFiber.StartNew(delegate
-                    {
-                        GameFiber.Wait(4800);
-                        Game.DisplayNotification("Copy that, responding ~b~CODE 3 ~s~to the ~b~Pacific Bank~s~, over.");
-                        Functions.PlayScannerAudio("COPY_THAT_MOVING_RIGHT_NOW REPORT_RESPONSE_COPY PROCEED_WITH_CAUTION_ASSORTED");
-                        GameFiber.Wait(3400);
-
-                        Game.DisplayNotification("Roger that, ~r~proceed with caution!");
-
-                    });
-
-                    LoadModels();
-                    while (Vector3.Distance(Game.LocalPlayer.Character.Position, SpawnPoint) > 350f)
-                    {
-                        GameFiber.Yield();
-                    }
-                    if (Game.LocalPlayer.Character.IsInAnyVehicle(false))
-                    {
-                        AllBankHeistEntities.Add(Game.LocalPlayer.Character.CurrentVehicle);
-                        Ped[] passengers = Game.LocalPlayer.Character.CurrentVehicle.Passengers;
-                        if (passengers.Length > 0)
-                        {
-                            foreach (Ped passenger in passengers)
-                            {
-                                AllBankHeistEntities.Add(passenger);
-                            }
-                        }
-                    }
-                    GameFiber.Yield();
-                    CreateSpeedZone();
-                    ClearUnrelatedEntities();
-                    Game.LogTrivial("Unrelated entities cleared");
-                    GameFiber.Yield();
-                    SpawnAllBarriers();
-
-                    SpawnAllPoliceCars();
-                    GameFiber.Yield();
-                    SpawnBothSwatTeams();
-                    GameFiber.Yield();
-                    SpawnNegotiationRobbers();
-                    GameFiber.Yield();
-                    SpawnAllPoliceOfficers();
-                    GameFiber.Yield();
-                    SpawnSneakyRobbers();
-
-
-                    SpawnHostages();
-                    GameFiber.Yield();
-                    SpawnEMSAndFire();
-                    GameFiber.Yield();
-                    if (AssortedCalloutsHandler.rnd.Next(10) < 2)
-                    {
-                        SpawnVaultRobbers();
-                    }
-
-                    Game.LogTrivial("Done spawning");
-
-                    MakeNearbyPedsFlee();
-
-                    SneakyRobbersAI();
-                    HandleHostages();
-                    HandleOpenBackRiotVan();
-                    HandleAudio();
-                    Game.LogTrivial("Initialisation complete, entering loop");
-
-                    while (CalloutRunning)
-                    {
-                        GameFiber.Yield();
-
-                        //Constants
-                        Game.LocalPlayer.Character.CanAttackFriendlies = false;
-                        Game.SetRelationshipBetweenRelationshipGroups("COP", "ROBBERS", Relationship.Hate);
-                        Game.SetRelationshipBetweenRelationshipGroups("ROBBERS", "COP", Relationship.Hate);
-                        Game.SetRelationshipBetweenRelationshipGroups("ROBBERS", "PLAYER", Relationship.Hate);
-                        Game.SetRelationshipBetweenRelationshipGroups("PLAYER", "ROBBERS", Relationship.Hate);
-                        Game.SetRelationshipBetweenRelationshipGroups("COP", "PLAYER", Relationship.Respect);
-                        Game.SetRelationshipBetweenRelationshipGroups("PLAYER", "COP", Relationship.Respect);
-                        Game.SetRelationshipBetweenRelationshipGroups("HOSTAGE", "PLAYER", Relationship.Respect);
-                        Game.SetRelationshipBetweenRelationshipGroups("SNEAKYROBBERS", "PLAYER", Relationship.Hate);
-                        Game.LocalPlayer.Character.IsInvincible = false;
-                        Rage.Native.NativeFunction.Natives.SET_PLAYER_WEAPON_DEFENSE_MODIFIER(Game.LocalPlayer, 0.45f);
-                        Rage.Native.NativeFunction.Natives.SET_PLAYER_WEAPON_DAMAGE_MODIFIER(Game.LocalPlayer, 0.92f);
-                        Rage.Native.NativeFunction.Natives.SET_AI_MELEE_WEAPON_DAMAGE_MODIFIER(1f);
-                        NativeFunction.CallByHash<uint>(_DOOR_CONTROL, 4072696575, 256.3116f, 220.6579f, 106.4296f, false, 0f, 0f, 0f);
-                        NativeFunction.CallByHash<uint>(_DOOR_CONTROL, 746855201, 262.1981f, 222.5188f, 106.4296f, false, 0f, 0f, 0f);
-                        NativeFunction.CallByHash<uint>(_DOOR_CONTROL, 110411286, 258.2022f, 204.1005f, 106.4049f, false, 0f, 0f, 0f);
-
-
-                        //When player has just arrived
-                        if (!TalkedToWells && !fighting)
-                        {
-                            if (!Game.LocalPlayer.Character.IsInAnyVehicle(false))
-                            {
-                                if (Vector3.Distance(Game.LocalPlayer.Character.Position, CaptainWells.Position) < 4f)
-                                {
-                                    Game.DisplayHelp("Press ~b~" + AssortedCalloutsHandler.kc.ConvertToString(AssortedCalloutsHandler.TalkKey) + " ~s~to talk.");
-                                    if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.TalkKey))
-                                    {
-
-                                        TalkedToWells = true;
-                                        if (ComputerPlusRunning)
-                                        {
-                                            API.ComputerPlusFuncs.AddUpdateToCallout(CalloutID, "Spoken with Captain Wells.");
-
-                                        }
-                                        DetermineInitialDialogue();
-                                    }
-                                }
-                                else
-                                {
-                                    Game.DisplayHelp("~h~Officer, please report to ~g~Captain Wells ~s~for briefing.");
-                                }
-                            }
-                        }
-                        //If fighting is initialised
-                        if (!FightingPrepared)
-                        {
-                            if (fighting)
-                            {
-                                if (ComputerPlusRunning)
-                                {
-                                    API.ComputerPlusFuncs.AddUpdateToCallout(CalloutID, "Preparing to enter the bank with SWAT.");
-
-                                }
-                                SpawnAssaultRobbers();
-                                SpawnMiniGunRobber();
-                                CopFightingAI();
-                                RobbersFightingAI();
-
-                                CheckForRobbersOutside();
-
-
-                                FightingPrepared = true;
-
-                            }
-                        }
-
-                        //If player talks to cpt wells during fight
-                        if (fighting)
-                        {
-                            if (!Game.LocalPlayer.Character.IsInAnyVehicle(false))
-                            {
-                                if (Vector3.Distance(Game.LocalPlayer.Character.Position, CaptainWells.Position) < 3f)
-                                {
-                                    Game.DisplayHelp("Press ~b~" + AssortedCalloutsHandler.kc.ConvertToString(AssortedCalloutsHandler.TalkKey) + " ~s~to talk.");
-                                    if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.TalkKey))
-                                    {
-                                        SpeechHandler.CptWellsLineAudioCount = 24;
-                                        SpeechHandler.HandleBankHeistSpeech(new List<string>() { "Cpt. Wells: Go on! There are still hostages in there!" }, LineFolderModifier: "Assault", WaitAfterLastLine: false);
-                                    }
-                                }
-                            }
-                        }
-
-
-                        //Make everyone fight if player enters bank
-                        if (!fighting && !Surrendering)
-                        {
-                            foreach (Vector3 check in PacificBankInsideChecks)
-                            {
-                                if (Vector3.Distance(check, Game.LocalPlayer.Character.Position) < 2.3f)
-                                {
-                                    fighting = true;
-                                }
-                            }
-                        }
-                        //If all hostages rescued break
-                        if (SafeHostagesCount == AliveHostagesCount)
-                        {
-
-                            break;
-                        }
-
-                        //If surrendered
-                        if (SurrenderComplete)
-                        {
-                            if (ComputerPlusRunning)
-                            {
-                                API.ComputerPlusFuncs.AddUpdateToCallout(CalloutID, "Robbers have surrendered. Going in to save hostages.");
-
-                            }
-                            break;
-                        }
-                        if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.FollowKey))
-                        {
-                            SWATFollowing = !SWATFollowing;
-                            if (SWATFollowing)
-                            {
-                                Game.DisplaySubtitle("The ~b~SWAT Units ~s~are now following you.", 3000);
-                            }
-                            else
-                            {
-                                Game.DisplaySubtitle("The ~b~SWAT Units ~s~are no longer following you.", 3000);
-                            }
-
-
-                        }
-                        if (SWATFollowing)
-                        {
-                            if (Game.LocalPlayer.Character.IsShooting)
-                            {
-                                SWATFollowing = false;
-                                Game.DisplaySubtitle("The ~b~SWAT Units ~s~are no longer following you.", 3000);
-                                Game.LogTrivial("Follow off - shooting");
-                            }
-                        }
-
-                    }
-                    //When surrendered
-                    if (SurrenderComplete) { CopFightingAI(); }
-                    while (CalloutRunning)
-                    {
-                        GameFiber.Yield();
-                        //Constants
-
-                        Game.SetRelationshipBetweenRelationshipGroups("COP", "ROBBERS", Relationship.Hate);
-                        Game.SetRelationshipBetweenRelationshipGroups("ROBBERS", "COP", Relationship.Hate);
-                        Game.SetRelationshipBetweenRelationshipGroups("ROBBERS", "PLAYER", Relationship.Hate);
-                        Game.SetRelationshipBetweenRelationshipGroups("PLAYER", "ROBBERS", Relationship.Hate);
-                        Game.SetRelationshipBetweenRelationshipGroups("COP", "PLAYER", Relationship.Companion);
-                        Game.SetRelationshipBetweenRelationshipGroups("PLAYER", "COP", Relationship.Companion);
-                        Game.SetRelationshipBetweenRelationshipGroups("HOSTAGE", "PLAYER", Relationship.Companion);
-                        Game.SetRelationshipBetweenRelationshipGroups("SNEAKYROBBERS", "PLAYER", Relationship.Hate);
-                        Game.LocalPlayer.Character.IsInvincible = false;
-                        Rage.Native.NativeFunction.Natives.SET_PLAYER_WEAPON_DEFENSE_MODIFIER(Game.LocalPlayer, 0.45f);
-                        Rage.Native.NativeFunction.Natives.SET_PLAYER_WEAPON_DAMAGE_MODIFIER(Game.LocalPlayer, 0.93f);
-                        Rage.Native.NativeFunction.Natives.SET_AI_MELEE_WEAPON_DAMAGE_MODIFIER(1f);
-                        NativeFunction.CallByHash<uint>(_DOOR_CONTROL, 4072696575, 256.3116f, 220.6579f, 106.4296f, false, 0f, 0f, 0f);
-                        NativeFunction.CallByHash<uint>(_DOOR_CONTROL, 746855201, 262.1981f, 222.5188f, 106.4296f, false, 0f, 0f, 0f);
-                        NativeFunction.CallByHash<uint>(_DOOR_CONTROL, 110411286, 258.2022f, 204.1005f, 106.4049f, false, 0f, 0f, 0f);
-                        //If all host rescued
-                        if (SafeHostagesCount == AliveHostagesCount)
-                        {
-                            GameFiber.Wait(3000);
-                            break;
-                        }
-                        if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.FollowKey))
-                        {
-                            SWATFollowing = !SWATFollowing;
-
-                            if (SWATFollowing)
-                            {
-                                Game.DisplaySubtitle("The ~b~SWAT Units ~s~are following you.", 3000);
-                            }
-                            else
-                            {
-                                Game.DisplaySubtitle("The ~b~SWAT Units ~s~are no longer following you.", 3000);
-                            }
-                        }
-                        if (SWATFollowing)
-                        {
-                            if (Game.LocalPlayer.Character.IsShooting)
-                            {
-                                SWATFollowing = false;
-                                Game.DisplaySubtitle("The ~b~SWAT Units ~s~are no longer following you.", 3000);
-                                Game.LogTrivial("Follow off - shooting");
-                            }
-                        }
-
-                        if (!Game.LocalPlayer.Character.IsInAnyVehicle(false))
-                        {
-                            if (Vector3.Distance(Game.LocalPlayer.Character.Position, CaptainWells.Position) < 4f)
-                            {
-                                Game.DisplayHelp("Press ~b~" + AssortedCalloutsHandler.kc.ConvertToString(AssortedCalloutsHandler.TalkKey) + " ~s~to talk.");
-                                if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.TalkKey))
-                                {
-                                    if (!TalkedToWells2nd)
-                                    {
-
-                                        List<string> CptWellsSurrenderedDialogue = new List<string>() { "Cpt. Wells: Amazing job, officer! It seems the robbers surrendered!", "Cpt. Wells: Your job now is to rescue all the hostages from the bank.", "Cpt. Wells: Please take care, you never know what the robbers left inside.", "Cpt. Wells: We have no idea if there are still robbers inside.", "You: Roger that, sir. This situation will be over in no time!", "You: Where can I get geared up?", "Cpt. Wells: There's gear in the back of the riot vans." };
-                                        SpeechHandler.HandleBankHeistSpeech(CptWellsSurrenderedDialogue);
-                                        TalkedToWells2nd = true;
-                                        fighting = true;
-                                        Game.DisplayNotification("Press ~b~" + AssortedCalloutsHandler.FollowKey + " ~s~to make the SWAT teams follow you.");
-                                    }
-                                    else
-                                    {
-
-                                        SpeechHandler.CptWellsLineAudioCount = 24;
-                                        SpeechHandler.HandleBankHeistSpeech(new List<string>() { "Cpt. Wells: Go on! There are still more hostages in there!" }, LineFolderModifier: "Assault", WaitAfterLastLine: false);
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                if (!TalkedToWells2nd)
-                                {
-                                    Game.DisplayHelp("~h~Officer, please report to ~g~Captain Wells.");
-                                }
-                            }
-                        }
-                    }
-
-
-
-                    //The end
-
-                    SWATFollowing = false;
-                    DoneFighting = true;
-                    CurrentAudioState = AudioState.None;
-                    AudioStateChanged = true;
-                    while (CalloutRunning)
-                    {
-                        GameFiber.Yield();
-                        NativeFunction.CallByHash<uint>(_DOOR_CONTROL, 4072696575, 256.3116f, 220.6579f, 106.4296f, false, 0f, 0f, 0f);
-                        NativeFunction.CallByHash<uint>(_DOOR_CONTROL, 746855201, 262.1981f, 222.5188f, 106.4296f, false, 0f, 0f, 0f);
-                        NativeFunction.CallByHash<uint>(_DOOR_CONTROL, 110411286, 258.2022f, 204.1005f, 106.4049f, false, 0f, 0f, 0f);
-                        if (!EvaluatedWithWells)
-                        {
-                            if (!Game.LocalPlayer.Character.IsInAnyVehicle(false))
-                            {
-                                if (Vector3.Distance(Game.LocalPlayer.Character.Position, CaptainWells.Position) < 4f)
-                                {
-                                    Game.DisplayHelp("Press ~b~" + AssortedCalloutsHandler.kc.ConvertToString(AssortedCalloutsHandler.TalkKey) + " ~s~to talk.");
-                                    if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownComputerCheck(AssortedCalloutsHandler.TalkKey))
-                                    {
-                                        TalkedToWells = true;
-                                        FinalDialogue();
-                                        GameFiber.Wait(4000);
-                                        DetermineResults();
-
-                                        GameFiber.Wait(9000);
-                                        break;
-                                    }
-                                }
-                                else
-                                {
-                                    Game.DisplayHelp("~h~Talk to ~g~Captain Wells~s~.");
-                                }
-                            }
-                        }
-                    }
-                    if (CalloutRunning)
-                    {
-                        Functions.PlayScannerAudio("ATTENTION_THIS_IS_DISPATCH_HIGH WE_ARE_CODE FOUR NO_FURTHER_UNITS_REQUIRED");
-                        Game.DisplayNotification("~o~Bank Heist ~s~callout is ~g~CODE 4.");
-                        CalloutFinished = true;
-
-                    }
-                    End();
-                }
-
-                catch (Exception e)
-                {
-                    Game.LogTrivial(e.ToString());
-                    End();
-                }
-            });
+            return Math.Abs(PlayerPosition.Z - cop.Position.Z) > 1f ? 1f : 4f;
         }
-
+        //STATUS: done
+        private void SetRelationshipGroups(Relationship relPlayerCopHostage)
+        {
+            Game.SetRelationshipBetweenRelationshipGroups("COP", "ROBBERS", Relationship.Hate);
+            Game.SetRelationshipBetweenRelationshipGroups("ROBBERS", "COP", Relationship.Hate);
+            Game.SetRelationshipBetweenRelationshipGroups("ROBBERS", "PLAYER", Relationship.Hate);
+            Game.SetRelationshipBetweenRelationshipGroups("PLAYER", "ROBBERS", Relationship.Hate);
+            Game.SetRelationshipBetweenRelationshipGroups("COP", "PLAYER", relPlayerCopHostage);
+            Game.SetRelationshipBetweenRelationshipGroups("PLAYER", "COP", relPlayerCopHostage);
+            Game.SetRelationshipBetweenRelationshipGroups("HOSTAGE", "PLAYER", relPlayerCopHostage);
+            Game.SetRelationshipBetweenRelationshipGroups("SNEAKYROBBERS", "PLAYER", Relationship.Hate);
+        }
+        //STATUS: done
+        private void SetWeaponModifiersForPlayer(float damage)
+        {
+            Rage.Native.NativeFunction.Natives.SET_PLAYER_WEAPON_DEFENSE_MODIFIER(Game.LocalPlayer, 0.45f);
+            Rage.Native.NativeFunction.Natives.SET_PLAYER_WEAPON_DAMAGE_MODIFIER(Game.LocalPlayer, damage);
+            Rage.Native.NativeFunction.Natives.SET_AI_MELEE_WEAPON_DAMAGE_MODIFIER(1f);
+        }
+        //STATUS: done
+        private void DoorControl()
+        {
+            //TODO: add a struct to hold DoorInformation
+            NativeFunction.CallByHash<uint>(_DOOR_CONTROL, 4072696575, 256.3116f, 220.6579f, 106.4296f, false, 0f, 0f, 0f);
+            NativeFunction.CallByHash<uint>(_DOOR_CONTROL, 746855201, 262.1981f, 222.5188f, 106.4296f, false, 0f, 0f, 0f);
+            NativeFunction.CallByHash<uint>(_DOOR_CONTROL, 110411286, 258.2022f, 204.1005f, 106.4049f, false, 0f, 0f, 0f);
+        }
+        //STATUS: research
         private void FinalDialogue()
         {
-            List<string> FinalDialogue = new List<string>() { "Cpt. Wells: Thank god you've brought this all to an end!", "You: Yeah, it was pretty hectic in there!", "Cpt. Wells: I will send you the operation report soon.", "Cpt. Wells: Good work today officer, thank you.", "You: Just doing my job, sir. " };
             SpeechHandler.CptWellsLineAudioCount = 21;
             SpeechHandler.YouLineAudioCount = 10;
-            SpeechHandler.HandleBankHeistSpeech(FinalDialogue, LineFolderModifier: "Outro");
-
+            SpeechHandler.HandleBankHeistSpeech(FinalDialogueText, LineFolderModifier: "Outro");
         }
+        //STATUS: to be refactored
         private void DetermineResults()
         {
             int HostagesDead = TotalHostagesCount - AliveHostagesCount;
-            foreach (Ped robber in Robbers)
-            {
-                if (robber.Exists())
-                {
-                    if (robber.IsDead)
-                    {
-                        RobbersKilled++;
 
-                    }
-                }
-            }
-            foreach (Ped robber in RobbersSneakySpawned)
-            {
-                if (robber.Exists())
-                {
-                    if (robber.IsDead)
-                    {
-                        RobbersKilled++;
-                    }
-                }
-            }
-            foreach (Ped swatunit in SWATUnitsSpawned)
-            {
-                if (swatunit.Exists())
-                {
-                    if (swatunit.IsDead)
-                    {
-                        SWATUnitsdied++;
-                    }
-                }
-            }
-            if (MiniGunRobber.Exists())
-            {
-                if (MiniGunRobber.IsDead)
-                {
-                    RobbersKilled++;
-                }
-            }
+            RobbersKilled += Robbers.Count(r => r.Exists() && r.IsDead);
+
+            RobbersKilled += SneakyRobbers.Count(r => r.Instance.Exists() && r.Instance.IsDead);
+
+            RobbersKilled += (MiniGunRobber.Exists() && MiniGunRobber.IsDead) ? 1 : 0;
+
+            SWATUnitsdied += SWATOperators.Count(s => s.Instance.Exists() && s.Instance.IsDead);
+
             Game.DisplayNotification("mphud", "mp_player_ready", "~h~Captain Wells", "Operation Report", "Hostages Rescued: " + SafeHostagesCount.ToString() + "~n~Hostages Dead: " + HostagesDead.ToString() + "~n~Robbers Killed: " + RobbersKilled.ToString() + "~n~Robbers Surrendered: " + SurrenderComplete.ToString());
             Game.DisplayNotification("mphud", "mp_player_ready", "~h~Captain Wells", "Operation Report - Continued", "Times died: " + TimesDied.ToString() + "~n~Times gear resupplied: " + FightingPacksUsed.ToString() + "~n~SWAT units died: " + SWATUnitsdied.ToString() + "~n~~b~End of report.");
+
             if (HostagesDead == 0)
             {
                 BigMessageThread bigMessage = new BigMessageThread(true);
                 bigMessage.MessageInstance.ShowMissionPassedMessage("All hostages were saved! Great job!", time: 8000);
-
             }
         }
-        public override bool OnBeforeCalloutDisplayed()
-        {
-            SpawnPoint = PacificBank;
-            if (Vector3.Distance(SpawnPoint, Game.LocalPlayer.Character.Position) < 90f)
-            {
-                return false;
-            }
-            else if (Vector3.Distance(SpawnPoint, Game.LocalPlayer.Character.Position) > 2800f)
-            {
-                return false;
-            }
-            ShowCalloutAreaBlipBeforeAccepting(SpawnPoint, 15f);
-            CalloutPosition = SpawnPoint;
-            CalloutMessage = "Pacific Bank Heist";
-            ComputerPlusRunning = AssortedCalloutsHandler.IsLSPDFRPluginRunning("ComputerPlus", new Version("1.3.0.0"));
-            if (ComputerPlusRunning)
-            {
-                CalloutID = API.ComputerPlusFuncs.CreateCallout("Pacific Bank Heist", "Bank Heist", SpawnPoint, 1, "Reports of a major bank heist at the Pacific Bank. Multiple emergency services on scene. Respond as a tactical commander.",
-                1, null, null);
-            }
-            Functions.PlayScannerAudioUsingPosition("DISP_ATTENTION_UNIT " + AssortedCalloutsHandler.DivisionUnitBeatAudioString + " WE_HAVE CRIME_BANKHEIST IN_OR_ON_POSITION ", SpawnPoint);
-            return base.OnBeforeCalloutDisplayed();
-        }
-
-        public override bool OnCalloutAccepted()
-        {
-
-            AlarmPlayer.Load();
-            if (Game.LocalPlayer.Character.IsInAnyVehicle(false))
-            {
-                AllBankHeistEntities.Add(Game.LocalPlayer.Character.CurrentVehicle);
-            }
-            if (!CalloutRunning)
-            {
-                CalloutHandler();
-            }
-
-
-            return base.OnCalloutAccepted();
-        }
+        //STATUS: refactored, review, use const dist
         private void MakeNearbyPedsFlee()
         {
-            GameFiber.StartNew(delegate
+            var selectedPeds = World.GetEntities(SpawnPoint, 80f, GetEntitiesFlags.ConsiderAllPeds | GetEntitiesFlags.ExcludePlayerPed | GetEntitiesFlags.ExcludePoliceOfficers);
+
+            foreach (Ped entity in selectedPeds)
             {
-                while (CalloutRunning)
+                if (AllBankHeistEntities.Contains(entity))
                 {
+                    continue;
+                }
 
-                    GameFiber.Yield();
+                if (!entity.Exists() || !entity.IsValid() || entity == Player || entity == Player.CurrentVehicle || entity.CreatedByTheCallingPlugin)
+                {
+                    continue;
+                }
 
-                    foreach (Ped entity in World.GetEntities(SpawnPoint, 80f, GetEntitiesFlags.ConsiderAllPeds | GetEntitiesFlags.ExcludePlayerPed | GetEntitiesFlags.ExcludePoliceOfficers))
+                if (Vector3.Distance(entity.Position, SpawnPoint) < 74f)
+                {
+                    if (entity.IsInAnyVehicle(false))
                     {
-                        GameFiber.Yield();
-                        if (AllBankHeistEntities.Contains(entity))
+                        if (entity.CurrentVehicle.Exists())
                         {
-                            continue;
-                        }
-                        if (entity != null)
-                        {
-                            if (entity.IsValid())
-                            {
-
-                                if (entity.Exists())
-                                {
-                                    if (entity != Game.LocalPlayer.Character)
-                                    {
-                                        if (entity != Game.LocalPlayer.Character.CurrentVehicle)
-                                        {
-
-                                            if (!entity.CreatedByTheCallingPlugin)
-                                            {
-
-                                                if (!AllBankHeistEntities.Contains(entity))
-                                                {
-                                                    if (Vector3.Distance(entity.Position, SpawnPoint) < 74f)
-                                                    {
-                                                        if (entity.IsInAnyVehicle(false))
-                                                        {
-                                                            if (entity.CurrentVehicle != null)
-                                                            {
-
-                                                                entity.Tasks.PerformDrivingManeuver(VehicleManeuver.Wait);
-
-
-                                                            }
-                                                        }
-                                                        else
-                                                        {
-                                                            Rage.Native.NativeFunction.CallByName<uint>("TASK_SMART_FLEE_COORD", entity, SpawnPoint.X, SpawnPoint.Y, SpawnPoint.Z, 75f, 6000, true, true);
-                                                        }
-
-                                                    }
-                                                    if (Vector3.Distance(entity.Position, SpawnPoint) < 65f)
-                                                    {
-                                                        if (entity.IsInAnyVehicle(false))
-                                                        {
-                                                            if (entity.CurrentVehicle.Exists())
-                                                            {
-                                                                entity.CurrentVehicle.Delete();
-                                                            }
-                                                        }
-                                                        if (entity.Exists())
-                                                        {
-                                                            entity.Delete();
-                                                        }
-
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            entity.Tasks.PerformDrivingManeuver(VehicleManeuver.Wait);
                         }
                     }
+                    else
+                    {
+                        NativeFunction.CallByName<uint>("TASK_SMART_FLEE_COORD", entity, SpawnPoint.X, SpawnPoint.Y, SpawnPoint.Z, 75f, 6000, true, true);
+                    }
                 }
-            });
+
+                if (Vector3.Distance(entity.Position, SpawnPoint) < 65f)
+                {
+                    DeleteEntity(entity.CurrentVehicle);
+                    DeleteEntity(entity);
+                }
+            }
         }
+        [Obsolete("Old f(), replaced with proc")]
         private void CreateSpeedZone()
         {
             GameFiber.StartNew(delegate
@@ -2378,106 +2707,100 @@ namespace AssortedCallouts.Callouts
                     foreach (Vehicle veh in World.GetEntities(SpawnPoint, 75f, GetEntitiesFlags.ConsiderGroundVehicles | GetEntitiesFlags.ExcludePoliceCars | GetEntitiesFlags.ExcludeFiretrucks | GetEntitiesFlags.ExcludeAmbulances))
                     {
                         GameFiber.Yield();
+
                         if (AllBankHeistEntities.Contains(veh))
                         {
                             continue;
                         }
-                        if (veh != null)
+
+                        if(!veh.Exists() || veh == Player.CurrentVehicle || veh.CreatedByTheCallingPlugin)
                         {
-                            if (veh.Exists())
-                            {
-                                if (veh != Game.LocalPlayer.Character.CurrentVehicle)
-                                {
-                                    if (!veh.CreatedByTheCallingPlugin)
-                                    {
-                                        if (!AllBankHeistEntities.Contains(veh))
-                                        {
-                                            if (veh.Velocity.Length() > 0f)
-                                            {
-                                                Vector3 velocity = veh.Velocity;
-                                                velocity.Normalize();
-                                                velocity *= 0f;
-                                                veh.Velocity = velocity;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            continue;
+                        }
+
+                        if (veh.Velocity.Length() > 0f)
+                        {
+                            Vector3 velocity = veh.Velocity;
+                            velocity.Normalize();
+                            velocity *= 0f;
+                            veh.Velocity = velocity;
                         }
                     }
                 }
             });
         }
-
-
+        //STATUS: refactored
         private void SpawnHostages()
         {
-            for (int i = 0; i < HostagesLocations.Count; i++)
+            for (int i = 0; i < Hostages.Count; i++)
             {
-                Ped hostage = new Ped(new Model(HostageModels[AssortedCalloutsHandler.rnd.Next(HostageModels.Length)]), HostagesLocations[i], HostagesHeadings[i]);
+                var h = Hostages[i];
+
+                var model = new Model(HostageModels[AssortedCalloutsHandler.rnd.Next(HostageModels.Length)]);
+                Ped hostage = new Ped(model, h.Position, h.Heading);
+                h.Instance = hostage;
 
                 hostage.IsPersistent = true;
                 hostage.BlockPermanentEvents = true;
                 Rage.Native.NativeFunction.Natives.SET_PED_CAN_RAGDOLL(hostage, false);
                 hostage.RelationshipGroup = "HOSTAGE";
                 hostage.CanAttackFriendlies = false;
-                AllHostages.Add(hostage);
-                SpawnedHostages.Add(hostage);
-                AllBankHeistEntities.Add(hostage);
                 hostage.Tasks.PlayAnimation("random@arrests", "kneeling_arrest_idle", 1f, AnimationFlags.Loop);
                 hostage.Armor = 0;
                 hostage.Health = 100;
-                GameFiber.Yield();
 
                 AliveHostagesCount++;
                 TotalHostagesCount++;
-
+                AllBankHeistEntities.Add(hostage);
             }
-
         }
-
+        //STATUS: refactored, replace foreach w/ for?
         private void SpawnEMSAndFire()
         {
-            for (int i = 0; i < AmbulanceLocations.Count; i++)
+            foreach (var a in Ambulances)
             {
-                Vehicle ambulance = new Vehicle(new Model("AMBULANCE"), AmbulanceLocations[i], AmbulanceHeadings[i]);
+                Vehicle ambulance = new Vehicle(new Model("AMBULANCE"), a.Position, a.Heading);
+                a.Instance = ambulance;
                 ambulance.IsPersistent = true;
                 ambulance.IsSirenOn = true;
                 ambulance.IsSirenSilent = true;
-                AmbulancesList.Add(ambulance);
                 AllBankHeistEntities.Add(ambulance);
             }
-            for (int i = 0; i < ParamedicLocations.Count; i++)
+
+            foreach (var p in Paramedics)
             {
-                Ped para = new Ped(new Model("S_M_M_PARAMEDIC_01"), ParamedicLocations[i], ParamedicHeadings[i]);
+                Ped para = new Ped(new Model("S_M_M_PARAMEDIC_01"), p.Position, p.Heading);
+                p.Instance = para;
                 para.IsPersistent = true;
                 para.BlockPermanentEvents = true;
-                ParamedicsList.Add(para);
-                AllBankHeistEntities.Add(para);
 
+                AllBankHeistEntities.Add(para);
             }
-            for (int i = 0; i < FireTruckLocations.Count; i++)
+            foreach (var t in Firetrucks)
             {
-                Vehicle firetruck = new Vehicle(new Model("FIRETRUK"), FireTruckLocations[i], FireTruckHeadings[i]);
+                Vehicle firetruck = new Vehicle(new Model("FIRETRUK"), t.Position, t.Heading);
+                t.Instance = firetruck;
                 firetruck.IsPersistent = true;
                 firetruck.IsSirenOn = true;
                 firetruck.IsSirenSilent = true;
-                AmbulancesList.Add(firetruck);
+
                 AllBankHeistEntities.Add(firetruck);
+
                 Ped fireman = new Ped(new Model("S_M_Y_FIREMAN_01"), SpawnPoint, 0f);
                 fireman.WarpIntoVehicle(firetruck, -1);
                 fireman.BlockPermanentEvents = true;
                 fireman.IsPersistent = true;
-                FiremenList.Add(fireman);
+
                 AllBankHeistEntities.Add(fireman);
             }
         }
-
+        //STATUS: to be refactored, create proper data structs
         private void SpawnAllPoliceOfficers()
         {
             for (int i = 0; i < PoliceOfficersStandingLocations.Count; i++)
             {
                 Ped officer = new Ped(new Model(LSPDModels[AssortedCalloutsHandler.rnd.Next(LSPDModels.Length)]), PoliceOfficersStandingLocations[i], PoliceOfficersStandingHeadings[i]);
+
                 Functions.SetPedAsCop(officer);
                 Functions.SetCopAsBusy(officer, true);
                 officer.CanBeTargetted = false;
@@ -2489,8 +2812,8 @@ namespace AssortedCallouts.Callouts
                 PoliceOfficersSpawned.Add(officer);
                 AllBankHeistEntities.Add(officer);
                 officer.CanAttackFriendlies = false;
-
             }
+
             for (int i = 0; i < PoliceOfficersAimingLocations.Count; i++)
             {
                 Ped officer = new Ped(new Model(LSPDModels[AssortedCalloutsHandler.rnd.Next(LSPDModels.Length)]), PoliceOfficersAimingLocations[i], PoliceOfficersAimingHeadings[i]);
@@ -2505,216 +2828,134 @@ namespace AssortedCallouts.Callouts
                 PoliceOfficersSpawned.Add(officer);
                 AllBankHeistEntities.Add(officer);
                 officer.CanAttackFriendlies = false;
-                Vector3 AimPoint;
-                if (Vector3.Distance(officer.Position, PacificBankDoors[0]) < Vector3.Distance(officer.Position, PacificBankDoors[1]))
-                {
-                    AimPoint = PacificBankDoors[0];
-                }
-                else
-                {
-                    AimPoint = PacificBankDoors[1];
-                }
+
+                float d1 = Vector3.Distance(officer.Position, PacificBankDoors[0]);
+                float d2 = Vector3.Distance(officer.Position, PacificBankDoors[1]);
+                Vector3 AimPoint = d1 < d2 ? PacificBankDoors[0] : PacificBankDoors[1];
+                
                 Rage.Native.NativeFunction.Natives.TASK_AIM_GUN_AT_COORD(officer, AimPoint.X, AimPoint.Y, AimPoint.Z, -1, false, false);
 
             }
+
             CaptainWells = new Ped(new Model("ig_fbisuit_01"), CaptainWellsLocation, CaptainWellsHeading);
             Functions.SetPedCantBeArrestedByPlayer(CaptainWells, true);
-
             CaptainWells.BlockPermanentEvents = true;
             CaptainWells.IsPersistent = true;
             CaptainWells.IsInvincible = true;
             CaptainWells.RelationshipGroup = "COP";
             CaptainWellsBlip = CaptainWells.AttachBlip();
-            CaptainWellsBlip.Color = System.Drawing.Color.Green;
+            CaptainWellsBlip.Color = Color.Green;
+
             AllBankHeistEntities.Add(CaptainWells);
         }
-
-        private void SpawnAllBarriers()
-        {
-            for (int i = 0; i < BarrierLocations.Count; i++)
-            {
-                Rage.Object Barrier = PlaceBarrier(BarrierLocations[i], BarrierHeadings[i]);
-                Barriers.Add(Barrier);
-                AllBankHeistEntities.Add(Barrier);
-
-
-            }
-
-        }
+        //STATUS: refactored, review
         private void SpawnAllPoliceCars()
         {
-            for (int i = 0; i < POLICECarLocations.Count; i++)
+            foreach (var v in PoliceVehicles)
             {
-                Vehicle car = new Vehicle("POLICE", POLICECarLocations[i], POLICECarHeadings[i]);
-                car.IsPersistent = true;
-                car.IsSirenOn = true;
-                car.IsSirenSilent = true;
-                AllSpawnedPoliceVehicles.Add(car);
-                AllBankHeistEntities.Add(car);
-            }
-            for (int i = 0; i < POLICE2CarLocations.Count; i++)
-            {
-                Vehicle car = new Vehicle("POLICE2", POLICE2CarLocations[i], POLICE2CarHeadings[i]);
-                car.IsPersistent = true;
-                car.IsSirenOn = true;
-                car.IsSirenSilent = true;
-                AllSpawnedPoliceVehicles.Add(car);
-                AllBankHeistEntities.Add(car);
-            }
-            for (int i = 0; i < POLICE3CarLocations.Count; i++)
-            {
-                Vehicle car = new Vehicle("POLICE3", POLICE3CarLocations[i], POLICE3CarHeadings[i]);
-                car.IsPersistent = true;
-                car.IsSirenOn = true;
-                car.IsSirenSilent = true;
-                AllSpawnedPoliceVehicles.Add(car);
-                AllBankHeistEntities.Add(car);
-            }
-            for (int i = 0; i < RiotLocations.Count; i++)
-            {
-                Vehicle car = new Vehicle("RIOT", RiotLocations[i], RiotHeadings[i]);
-                car.IsPersistent = true;
-                car.IsSirenOn = true;
-                car.IsSirenSilent = true;
-                AllSpawnedPoliceVehicles.Add(car);
-                RiotVans.Add(car);
-                AllBankHeistEntities.Add(car);
+                v.Instance = new Vehicle(v.Model, v.Position, v.Heading);
+                var i = v.Instance;
+                i.IsPersistent = true;
+                i.IsSirenOn = true;
+                i.IsSirenSilent = true;
+                AllBankHeistEntities.Add(i);
+                if (v.Model == "RIOT") RiotVans.Add(i);
             }
         }
+        //STATUS: refactored, review, apply changes to data structs?
         private void SpawnBothSwatTeams()
         {
-            for (int i = 0; i < SWATTeam1Locations.Count; i++)
+            foreach (var op in SWATOperators)
             {
-
-                Ped unit = new Ped("s_m_y_swat_01", SWATTeam1Locations[i], SWATTeam1Headings[i]);
-                Functions.SetPedAsCop(unit);
-                Functions.SetCopAsBusy(unit, true);
-                unit.CanBeTargetted = false;
-                unit.BlockPermanentEvents = true;
-                unit.IsPersistent = true;
-                unit.Inventory.GiveNewWeapon(new WeaponAsset(SWATWeapons[AssortedCalloutsHandler.rnd.Next(SWATWeapons.Length)]), 10000, true);
-                unit.RelationshipGroup = "COP";
-                //Rage.Native.NativeFunction.CallByName<uint>("SET_PED_TO_LOAD_COVER", unit, true);
-                unit.Tasks.PlayAnimation("cover@weapon@rpg", "blindfire_low_l_enter_low_edge", 1f, AnimationFlags.StayInEndFrame);
-                //Rage.Native.NativeFunction.Natives.SET_PED_COMPONENT_VARIATION( unit, 1, 1, 1, 1);
-                Rage.Native.NativeFunction.Natives.SET_PED_PROP_INDEX(unit, 0, 0, 0, 2);
-                Rage.Native.NativeFunction.Natives.SetPedCombatAbility(unit, 2);
-                unit.CanAttackFriendlies = false;
-
-                unit.Health = 209;
-                unit.Armor = 92;
-
-                SWATUnitsSpawned.Add(unit);
-                SWATTeam1.Add(unit);
-                AllBankHeistEntities.Add(unit);
+                op.Instance = SpawnSWATOperator(op);
+                AllBankHeistEntities.Add(op.Instance);
             }
-            for (int i = 0; i < SWATTeam2Locations.Count; i++)
-            {
 
-
-                Ped unit = new Ped("s_m_y_swat_01", SWATTeam2Locations[i], SWATTeam2Headings[i]);
-                Functions.SetPedAsCop(unit);
-                Functions.SetCopAsBusy(unit, true);
-                unit.CanBeTargetted = false;
-
-                unit.BlockPermanentEvents = true;
-                unit.IsPersistent = true;
-                unit.Inventory.GiveNewWeapon(new WeaponAsset(SWATWeapons[AssortedCalloutsHandler.rnd.Next(SWATWeapons.Length)]), 10000, true);
-                unit.RelationshipGroup = "COP";
-                //Rage.Native.NativeFunction.CallByName<uint>("SET_PED_TO_LOAD_COVER", unit, true);
-                //Rage.Native.NativeFunction.Natives.SET_PED_COMPONENT_VARIATION( unit, 1, 1, 1, 1);
-                unit.Tasks.PlayAnimation("cover@weapon@rpg", "blindfire_low_l_enter_low_edge", 1f, AnimationFlags.StayInEndFrame);
-                Rage.Native.NativeFunction.Natives.SET_PED_PROP_INDEX(unit, 0, 0, 0, 2);
-                Rage.Native.NativeFunction.Natives.SetPedCombatAbility(unit, 2);
-                unit.CanAttackFriendlies = false;
-
-                unit.Health = 209;
-                unit.Armor = 92;
-
-                SWATUnitsSpawned.Add(unit);
-                SWATTeam2.Add(unit);
-                AllBankHeistEntities.Add(unit);
-            }
+            //TODO:
+            // - make 1 SWAT operators list
+            // - use SwatOperators instead of SwatTeam1/2 AND swatUnitsSpawned
         }
+        //STATUS: refactored, review
+        private Ped SpawnSWATOperator(EntityData<Ped> data)
+        {
+            Ped unit = new Ped("s_m_y_swat_01", data.Position, data.Heading);
+            Functions.SetPedAsCop(unit);
+            Functions.SetCopAsBusy(unit, true);
+
+            unit.CanBeTargetted = false;
+            unit.BlockPermanentEvents = true;
+            unit.IsPersistent = true;
+            unit.Inventory.GiveNewWeapon(new WeaponAsset(SWATWeapons[AssortedCalloutsHandler.rnd.Next(SWATWeapons.Length)]), 10000, true);
+            unit.RelationshipGroup = "COP";
+
+            unit.Tasks.PlayAnimation("cover@weapon@rpg", "blindfire_low_l_enter_low_edge", 1f, AnimationFlags.StayInEndFrame);
+            NativeFunction.Natives.SET_PED_PROP_INDEX(unit, 0, 0, 0, 2);
+            NativeFunction.Natives.SetPedCombatAbility(unit, 2);
+            unit.CanAttackFriendlies = false;
+            unit.Health = 209;
+            unit.Armor = 92;
+
+            return unit;
+        }
+        //STATUS: refactored, review
         private void SpawnNegotiationRobbers()
         {
-            for (int i = 0; i < RobbersNegotiationLocations.Count; i++)
+            foreach (var r in RobbersNegotiation)
             {
-                Ped unit = new Ped("mp_g_m_pros_01", RobbersNegotiationLocations[i], RobbersNegotiationHeadings[i]);
-                if (AssortedCalloutsHandler.rnd.Next(2) == 0)
-                {
-                    NativeFunction.Natives.SET_PED_COMPONENT_VARIATION(unit, 9, 2, 1, 0);
-                }
-                else
-                {
-                    NativeFunction.Natives.SET_PED_COMPONENT_VARIATION(unit, 9, 1, 1, 0);
-                }
-                Functions.SetPedCantBeArrestedByPlayer(unit, true);
-
-                unit.IsPersistent = true;
-                unit.BlockPermanentEvents = true;
-                unit.Inventory.GiveNewWeapon(new WeaponAsset(RobbersWeapons[AssortedCalloutsHandler.rnd.Next(RobbersWeapons.Length)]), 10000, true);
-                unit.RelationshipGroup = "ROBBERS";
-                Rage.Native.NativeFunction.Natives.SetPedCombatAbility(unit, 3);
-                unit.CanAttackFriendlies = false;
-
-                unit.Armor = 145;
-                unit.Health += 190;
-                Robbers.Add(unit);
-                AllBankHeistEntities.Add(unit);
+                var wpn = new WeaponAsset(RobbersWeapons[AssortedCalloutsHandler.rnd.Next(RobbersWeapons.Length)]);
+                var s = SpawnRobber(r, wpn, "ROBBER", 145, 190);
+                r.Instance = s;
+                Robbers.Add(s);
+                AllBankHeistEntities.Add(s);
             }
-
         }
-
+        //STATUS: done
+        private int GetRndRobberVariation() => AssortedCalloutsHandler.rnd.Next(2) == 0 ? 2 : 1;
+        //STATUS: refactored, review
         private void SpawnSneakyRobbers()
         {
-            for (int i = 0; i < RobbersSneakyLocations.Count; i++)
+            foreach (var r in SneakyRobbers)
             {
-                if (AssortedCalloutsHandler.rnd.Next(5) >= 3)
-                {
-                    Ped unit = new Ped("mp_g_m_pros_01", RobbersSneakyLocations[i], RobbersSneakyHeadings[i]);
-                    if (AssortedCalloutsHandler.rnd.Next(2) == 0)
-                    {
-                        NativeFunction.Natives.SET_PED_COMPONENT_VARIATION(unit, 9, 2, 1, 0);
-                    }
-                    else
-                    {
-                        NativeFunction.Natives.SET_PED_COMPONENT_VARIATION(unit, 9, 1, 1, 0);
-                    }
-                    Functions.SetPedCantBeArrestedByPlayer(unit, true);
-                    unit.IsPersistent = true;
-                    unit.BlockPermanentEvents = true;
-                    unit.Inventory.GiveNewWeapon(new WeaponAsset(RobbersSneakyWeapons[AssortedCalloutsHandler.rnd.Next(RobbersSneakyWeapons.Length)]), 10000, true);
-                    unit.RelationshipGroup = "SNEAKYROBBERS";
-                    Rage.Native.NativeFunction.Natives.SetPedCombatAbility(unit, 3);
-                    unit.CanAttackFriendlies = false;
-                    unit.Tasks.PlayAnimation("cover@weapon@rpg", "blindfire_low_l_enter_low_edge", 1f, AnimationFlags.StayInEndFrame);
-                    unit.Armor = 80;
-                    unit.Health += 185;
-                    RobbersSneakySpawned.Add(unit);
-                    AllBankHeistEntities.Add(unit);
+                if (AssortedCalloutsHandler.rnd.Next(5) < 3) continue;
 
-                }
-                else
-                {
-                    RobbersSneakySpawned.Add(null);
-                }
+                var wpn = new WeaponAsset(RobbersSneakyWeapons[AssortedCalloutsHandler.rnd.Next(RobbersSneakyWeapons.Length)]);
+
+                var s = SpawnRobber(r, wpn, "SNEAKYROBBERS", 80, 185);
+                r.Instance = s;
+                s.Tasks.PlayAnimation("cover@weapon@rpg", "blindfire_low_l_enter_low_edge", 1f, AnimationFlags.StayInEndFrame);
+
+                AllBankHeistEntities.Add(s);
             }
         }
+        //STATUS: refactored, review
+        private Ped SpawnRobber(EntityData<Ped> data, WeaponAsset wpn, string relGroup, int armor, int addHealth)
+        {
+            Ped unit = new Ped("mp_g_m_pros_01", data.Position, data.Heading);
 
+            NativeFunction.Natives.SET_PED_COMPONENT_VARIATION(unit, 9, GetRndRobberVariation(), 1, 0);
+            Functions.SetPedCantBeArrestedByPlayer(unit, true);
+
+            unit.IsPersistent = true;
+            unit.BlockPermanentEvents = true;
+            unit.Inventory.GiveNewWeapon(wpn, 10000, true);
+            unit.RelationshipGroup = relGroup;
+            Rage.Native.NativeFunction.Natives.SetPedCombatAbility(unit, 3);
+            unit.CanAttackFriendlies = false;
+            unit.Armor = armor;
+            unit.Health += addHealth;
+
+            return unit;
+        }
+        //STATUS: to be refactored
         private void SpawnAssaultRobbers()
         {
             for (int i = 0; i < RobbersAssaultLocations.Count; i++)
             {
                 Ped unit = new Ped("mp_g_m_pros_01", RobbersAssaultLocations[i], RobbersAssaultHeadings[i]);
-                if (AssortedCalloutsHandler.rnd.Next(2) == 0)
-                {
-                    NativeFunction.Natives.SET_PED_COMPONENT_VARIATION(unit, 9, 2, 1, 0);
-                }
-                else
-                {
-                    NativeFunction.Natives.SET_PED_COMPONENT_VARIATION(unit, 9, 1, 1, 0);
-                }
+
+                var val = GetRndRobberVariation();
+                NativeFunction.Natives.SET_PED_COMPONENT_VARIATION(unit, 9, val, 1, 0);
+
                 Functions.SetPedCantBeArrestedByPlayer(unit, true);
                 unit.IsPersistent = true;
                 unit.BlockPermanentEvents = true;
@@ -2725,49 +2966,30 @@ namespace AssortedCallouts.Callouts
                 unit.CanAttackFriendlies = false;
                 unit.Armor = 238;
                 unit.Health += 280;
+
                 Robbers.Add(unit);
                 AllBankHeistEntities.Add(unit);
             }
         }
-
+        ////STATUS: refactored, review
         private void SpawnVaultRobbers()
         {
-            for (int i = 0; i < RobbersVaultLocations.Count; i++)
+            foreach (var r in VaultRobbers)
             {
-                Ped unit = new Ped("mp_g_m_pros_01", RobbersVaultLocations[i], RobbersVaultHeadings[i]);
-                if (AssortedCalloutsHandler.rnd.Next(2) == 0)
-                {
-                    NativeFunction.Natives.SET_PED_COMPONENT_VARIATION(unit, 9, 2, 1, 0);
-                }
-                else
-                {
-                    NativeFunction.Natives.SET_PED_COMPONENT_VARIATION(unit, 9, 1, 1, 0);
-                }
-                Functions.SetPedCantBeArrestedByPlayer(unit, true);
-                unit.IsPersistent = true;
-                unit.BlockPermanentEvents = true;
-                unit.Inventory.GiveNewWeapon(new WeaponAsset("WEAPON_ASSAULTSMG"), 10000, true);
-                unit.RelationshipGroup = "ROBBERS";
-                Rage.Native.NativeFunction.Natives.SetPedCombatAbility(unit, 3);
-                unit.CanAttackFriendlies = false;
-                unit.Armor = 95;
-                unit.Health += 230;
-                RobbersVault.Add(unit);
-                AllBankHeistEntities.Add(unit);
+                var wpn = new WeaponAsset("WEAPON_ASSAULTSMG");
+                var s = SpawnRobber(r, wpn, "ROBBERS", 95, 230);
+                r.Instance = s;
+                AllBankHeistEntities.Add(s);
             }
-            HandleVaultRobbers();
         }
+        //STATUS: to be refactored, extract common core from Spawn f()'s
         private void SpawnMiniGunRobber()
         {
             MiniGunRobber = new Ped("mp_g_m_pros_01", MiniGunRobberLocation, MiniGunRobberHeading);
-            if (AssortedCalloutsHandler.rnd.Next(2) == 0)
-            {
-                NativeFunction.Natives.SET_PED_COMPONENT_VARIATION(MiniGunRobber, 9, 2, 1, 0);
-            }
-            else
-            {
-                NativeFunction.Natives.SET_PED_COMPONENT_VARIATION(MiniGunRobber, 9, 1, 1, 0);
-            }
+
+            var val = GetRndRobberVariation();
+            NativeFunction.Natives.SET_PED_COMPONENT_VARIATION(MiniGunRobber, 9, val, 1, 0);
+
             Functions.SetPedCantBeArrestedByPlayer(MiniGunRobber, true);
             MiniGunRobber.IsPersistent = true;
             MiniGunRobber.BlockPermanentEvents = true;
@@ -2782,92 +3004,7 @@ namespace AssortedCallouts.Callouts
             MiniGunRobber.Health += 185;
             AllBankHeistEntities.Add(MiniGunRobber);
         }
-
-        private Rage.Object PlaceBarrier(Vector3 Location, float Heading)
-        {
-            Rage.Object Barrier = new Rage.Object("prop_barrier_work05", Location);
-            Barrier.Heading = Heading;
-            Barrier.IsPositionFrozen = true;
-            Barrier.IsPersistent = true;
-            Rage.Object invWall = new Rage.Object("p_ice_box_01_s", Barrier.Position);
-            Ped invPed = new Ped(invWall.Position);
-            invPed.IsVisible = false;
-            invPed.IsPositionFrozen = true;
-            invPed.BlockPermanentEvents = true;
-            invPed.IsPersistent = true;
-            invWall.Heading = Heading;
-            invWall.IsVisible = false;
-            invWall.IsPersistent = true;
-
-            InvisWalls.Add(invWall);
-            BarrierPeds.Add(invPed);
-            return Barrier;
-
-        }
-        private void ClearUnrelatedEntities()
-        {
-
-            foreach (Ped entity in World.GetEntities(SpawnPoint, 50f, GetEntitiesFlags.ConsiderAllPeds))
-            {
-                GameFiber.Yield();
-                if (entity != null)
-                {
-                    if (entity.IsValid())
-                    {
-                        if (entity.Exists())
-                        {
-                            if (entity != Game.LocalPlayer.Character)
-                            {
-                                if (entity != Game.LocalPlayer.Character.CurrentVehicle)
-                                {
-                                    if (!entity.CreatedByTheCallingPlugin)
-                                    {
-
-                                        if (!AllBankHeistEntities.Contains(entity))
-                                        {
-                                            if (Vector3.Distance(entity.Position, SpawnPoint) < 50f)
-                                            {
-                                                entity.Delete();
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            foreach (Vehicle entity in World.GetEntities(SpawnPoint, 50f, GetEntitiesFlags.ConsiderGroundVehicles))
-            {
-                GameFiber.Yield();
-                if (entity != null)
-                {
-                    if (entity.IsValid())
-                    {
-                        if (entity.Exists())
-                        {
-                            if (entity != Game.LocalPlayer.Character)
-                            {
-                                if (entity != Game.LocalPlayer.Character.CurrentVehicle)
-                                {
-                                    if (!entity.CreatedByTheCallingPlugin)
-                                    {
-
-                                        if (!AllBankHeistEntities.Contains(entity))
-                                        {
-                                            if (Vector3.Distance(entity.Position, SpawnPoint) < 50f)
-                                            {
-                                                entity.Delete();
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        //STATUS: to be refactored
         private void HandleCustomRespawn()
         {
             HandlingRespawn = true;
@@ -2901,82 +3038,68 @@ namespace AssortedCallouts.Callouts
                 }
                 Game.LocalPlayer.HasControl = false;
                 Game.FadeScreenOut(1, true);
-                Game.LocalPlayer.Character.WarpIntoVehicle(AmbulancesList[0], 2);
+                Game.LocalPlayer.Character.WarpIntoVehicle(Ambulances[0].Instance, 2);
 
 
                 Game.FadeScreenIn(2500, true);
                 Game.LocalPlayer.HasControl = true;
                 CurrentAudioState = OldAudioState;
                 AudioStateChanged = true;
-                Game.LocalPlayer.Character.WarpIntoVehicle(AmbulancesList[0], 2);
+                Player.WarpIntoVehicle(Ambulances[0].Instance, 2);
+
                 GameFiber.Yield();
-                if (Game.LocalPlayer.Character.IsInVehicle(AmbulancesList[0], false))
+
+                if (Player.IsInVehicle(Ambulances[0].Instance, false))
                 {
-                    Game.LocalPlayer.Character.Tasks.LeaveVehicle(LeaveVehicleFlags.None).WaitForCompletion();
+                    Player.Tasks.LeaveVehicle(LeaveVehicleFlags.None).WaitForCompletion();
                 }
+
                 while (true)
                 {
                     GameFiber.Yield();
-                    if (Vector3.Distance(Game.LocalPlayer.Character.Position, AmbulancesList[0].Position) < 70f)
+                    if (Vector3.Distance(PlayerPosition, Ambulances[0].Instance.Position) < 70f)
                     {
                         break;
                     }
-                    if (Game.LocalPlayer.Character.IsAlive)
+                    if (Player.IsAlive)
                     {
                         Game.DisplayHelp("Press ~b~Enter ~s~when spawned to spawn to the ambulance.");
                         if (Albo1125.Common.CommonLibrary.ExtensionMethods.IsKeyDownComputerCheck(Keys.Enter))
                         {
-                            Game.LocalPlayer.Character.WarpIntoVehicle(AmbulancesList[0], 2);
+                            Player.WarpIntoVehicle(Ambulances[0].Instance, 2);
                             Game.HideHelp();
                             GameFiber.Sleep(1000);
                         }
                     }
                 }
+
                 MiniGunRobberFiring = false;
                 HandlingRespawn = false;
-
             });
         }
 
-
-        public override void Process()
-        {
-            base.Process();
-
-            if (CalloutRunning)
-            {
-                if (!HandlingRespawn)
-                {
-                    if (Game.LocalPlayer.Character.IsDead)
-                    {
-                        HandleCustomRespawn();
-                    }
-                }
-            }
-        }
-
-
-        public override void OnCalloutNotAccepted()
-        {
-            base.OnCalloutNotAccepted();
-        }
         public override void End()
         {
             base.End();
             CalloutRunning = false;
             AlarmPlayer.Stop();
+
             SpeechHandler.DisplayTime = false;
             SpeechHandler.DisplayingBankHeistSpeech = false;
+
             Game.LocalPlayer.Character.IsPositionFrozen = false;
             Game.LocalPlayer.HasControl = true;
             //Game.LocalPlayer.Character.CanAttackFriendlies = false;
+
             Rage.Native.NativeFunction.Natives.SET_PLAYER_WEAPON_DEFENSE_MODIFIER(Game.LocalPlayer, 1f);
             Rage.Native.NativeFunction.Natives.SET_PLAYER_WEAPON_DAMAGE_MODIFIER(Game.LocalPlayer, 1f);
             Rage.Native.NativeFunction.Natives.RESET_AI_WEAPON_DAMAGE_MODIFIER();
             Rage.Native.NativeFunction.Natives.RESET_AI_MELEE_WEAPON_DAMAGE_MODIFIER();
+
             if (SideDoorBlip.Exists()) { SideDoorBlip.Delete(); }
             if (MobilePhone.Exists()) { MobilePhone.Delete(); }
             ToggleMobilePhone(Game.LocalPlayer.Character, false);
+
             if (!CalloutFinished)
             {
                 if (Maria.Exists()) { Maria.Delete(); }
@@ -3044,47 +3167,20 @@ namespace AssortedCallouts.Callouts
                         i.Delete();
                     }
                 }
-                foreach (Ped i in SWATTeam1)
-                {
-                    if (i.Exists())
-                    {
-                        i.Delete();
-                    }
-                }
-                foreach (Ped i in SWATTeam2)
-                {
-                    if (i.Exists())
-                    {
-                        i.Delete();
-                    }
-                }
 
-                foreach (Vehicle i in AllSpawnedPoliceVehicles)
-                {
-                    if (i.Exists()) { i.Delete(); }
-                }
+                SWATOperators.ForEach(o => DeleteEntity(o.Instance));
+
                 foreach (Vehicle i in FireTrucksList)
                 {
                     if (i.Exists()) { i.Delete(); }
                 }
-                foreach (Vehicle i in AmbulancesList)
+
+
+                foreach (var b in Barriers_)
                 {
-                    if (i.Exists()) { i.Delete(); }
-                }
-                foreach (Rage.Object i in Barriers)
-                {
-                    if (i.Exists()) { i.Delete(); }
-                }
-                foreach (Rage.Object i in InvisWalls)
-                {
-                    if (i.Exists()) { i.Delete(); }
-                }
-                foreach (Ped i in BarrierPeds)
-                {
-                    if (i.Exists())
-                    {
-                        i.Delete();
-                    }
+                    DeleteEntity(b.Instance);
+                    DeleteEntity(b.InvisibleWall);
+                    DeleteEntity(b.Ped);
                 }
             }
             else
@@ -3145,6 +3241,10 @@ namespace AssortedCallouts.Callouts
                         i.Dismiss();
                     }
                 }
+
+
+
+                Ambulances.ForEach(a => DeleteEntity(a.Instance));
                 foreach (Vehicle i in AmbulancesList)
                 {
                     if (i.Exists())
@@ -3197,22 +3297,9 @@ namespace AssortedCallouts.Callouts
                         i.Dismiss();
                     }
                 }
-                foreach (Ped i in SWATTeam1)
+                foreach (var p in PoliceVehicles)
                 {
-                    if (i.Exists())
-                    {
-                        i.Dismiss();
-                    }
-                }
-                foreach (Ped i in SWATTeam2)
-                {
-                    if (i.Exists())
-                    {
-                        i.Dismiss();
-                    }
-                }
-                foreach (Vehicle i in AllSpawnedPoliceVehicles)
-                {
+                    var i = p.Instance;
                     if (i.Exists())
                     {
                         Ped driver;
@@ -3227,23 +3314,364 @@ namespace AssortedCallouts.Callouts
                         i.Dismiss();
                     }
                 }
-                foreach (Ped i in BarrierPeds)
-                {
-                    if (i.Exists())
-                    {
-                        i.Delete();
-                    }
-                }
-                foreach (Rage.Object i in InvisWalls)
-                {
-                    if (i.Exists()) { i.Delete(); }
-                }
 
-                foreach (Rage.Object i in Barriers)
+                foreach (var b in Barriers_)
                 {
-                    if (i.Exists()) { i.Delete(); }
+                    DeleteEntity(b.Instance);
+                    DeleteEntity(b.InvisibleWall);
+                    DeleteEntity(b.Ped);
                 }
             }
         }
+    }
+
+    internal partial class BankHeist : AssortedCallout
+    {
+        private class EntityData<T> where T : Rage.Entity
+        {
+            public string Model;
+            public Vector3 Position;
+            public float Heading;
+            public T Instance;
+        }
+        private Vector3 DoorSide1 = new Vector3(265.542f, 217.4402f, 110.283f);
+        private Vector3 DoorSide2 = new Vector3(265.8473f, 218.1096f, 110.283f);
+
+        List<string> FinalDialogueText = new List<string>() { "Cpt. Wells: Thank god you've brought this all to an end!", "You: Yeah, it was pretty hectic in there!", "Cpt. Wells: I will send you the operation report soon.", "Cpt. Wells: Good work today officer, thank you.", "You: Just doing my job, sir. " };
+        private List<string> AlarmAnswers = new List<string>() { "You: Yeah definitely, I can't hear myself think with that thing going.", "You: Nah, it doesn't bother me that much." };
+        private static string[] LSPDModels = new string[] { "s_m_y_cop_01", "S_F_Y_COP_01" };
+        private string[] SWATWeapons = new string[] { "WEAPON_CARBINERIFLE", "WEAPON_ASSAULTSMG" };
+        private string[] Grenades = new string[] { "WEAPON_GRENADE", "WEAPON_SMOKEGRENADE" };
+        private string[] HostageModels = new string[] { "A_F_M_BUSINESS_02", "A_M_M_BUSINESS_01", "A_F_Y_FEMALEAGENT", "A_M_Y_BUSINESS_03" };
+        private string[] RobbersSneakyWeapons = new string[] { "WEAPON_PISTOL50", "WEAPON_KNIFE", "WEAPON_ASSAULTSMG", "WEAPON_ASSAULTSHOTGUN", "WEAPON_CROWBAR", "WEAPON_HAMMER", "WEAPON_ASSAULTRIFLE" };
+        private string[] RobbersWeapons = new string[] { "WEAPON_SAWNOFFSHOTGUN", "WEAPON_ASSAULTRIFLE", "WEAPON_PUMPSHOTGUN", "WEAPON_ASSAULTSHOTGUN", "WEAPON_ADVANCEDRIFLE" };
+
+        class BarrierData
+        {
+            public Vector3 Position;
+            public float Heading;
+            public Rage.Object Instance;
+            public Ped Ped;
+            public Rage.Object InvisibleWall;
+        }
+
+        List<BarrierData> Barriers_ = new List<BarrierData>
+        {
+            new BarrierData()
+            {
+                Position = new Vector3(215.393f, 203.157f, 104.454f),
+                Heading = 286.3633f,
+            },
+            new BarrierData()
+            {
+                Position = new Vector3(215.1232f, 205.6814f, 104.4652f),
+                Heading = 290.2363f,
+            },
+            new BarrierData()
+            {
+                Position = new Vector3(218.4388f, 196.256f, 104.5912f),
+                Heading = 344.4589f,
+            },
+            new BarrierData()
+            {
+                Position = new Vector3(233.0477f, 191.5893f, 104.3578f),
+                Heading = 346.3031f,
+            },
+            new BarrierData()
+            {
+                Position = new Vector3(235.1332f, 191.1562f, 104.3189f),
+                Heading = 341.4462f,
+            },
+            new BarrierData()
+            {
+                Position = new Vector3(237.6775f, 190.3424f, 104.2726f),
+                Heading = 342.168f,
+            },
+            new BarrierData()
+            {
+                Position = new Vector3(247.1391f, 188.03f, 104.0998f),
+                Heading = 25.01121f,
+            },
+            new BarrierData()
+            {
+                Position = new Vector3(244.9249f, 187.9552f, 104.1492f),
+                Heading = 1.558372f,
+            },
+            new BarrierData()
+            {
+                Position = new Vector3(218.238f, 213.5867f, 104.4652f),
+                Heading = 255.0954f,
+            },
+            new BarrierData()
+            {
+                Position = new Vector3(218.7885f, 216.0675f, 104.4652f),
+                Heading = 255.0954f,
+            },
+            new BarrierData()
+            {
+                Position = new Vector3(219.6092f, 218.8511f, 104.4652f),
+                Heading = 267.3944f,
+            },
+        };
+
+        private List<EntityData<Vehicle>> PoliceVehicles = new List<EntityData<Vehicle>>()
+        {
+            new EntityData<Vehicle>()
+            {
+                Model = "POLICE",
+                Position = new Vector3(222.4914f, 196.139f, 105.2151f),
+                Heading = 251.93f,
+            },
+            new EntityData<Vehicle>()
+            {
+                Model = "POLICE",
+                Position = new Vector3(228.7804f, 193.9648f, 105.0773f),
+                Heading = 70.06104f,
+            },
+            new EntityData<Vehicle>()
+            {
+                Model = "POLICE",
+                Position = new Vector3(250.7617f, 190.7597f, 104.5666f),
+                Heading = 291.0875f,
+            },
+
+            new EntityData<Vehicle>()
+            {
+                Model = "POLICE2",
+                Position = new Vector3(216.4797f, 199.8008f, 105.1088f),
+                Heading = 11.46685f,
+            },
+            new EntityData<Vehicle>()
+            {
+                Model = "POLICE2",
+                Position = new Vector3(216.3862f, 209.5035f, 105.1084f),
+                Heading = 339.02f,
+            },
+            new EntityData<Vehicle>()
+            {
+                Model = "POLICE3",
+                Position = new Vector3(241.5773f, 190.1744f, 104.9979f),
+                Heading = 246.1062f,
+            },
+            new EntityData<Vehicle>()
+            {
+                Model = "POLICE3",
+                Position = new Vector3(223.8036f, 221.5969f, 105.2692f),
+                Heading = 305.6254f,
+            },
+
+            new EntityData<Vehicle>()
+            {
+                Model = "RIOT",
+                Position = new Vector3(224.1989f, 207.5056f, 105.1199f),
+                Heading = 193.6453f,
+            },
+            new EntityData<Vehicle>()
+            {
+                Model = "RIOT",
+                Position = new Vector3(263.7726f, 193.397f, 104.4452f),
+                Heading = 214.4147f,
+            },
+        };
+
+        private List<Vehicle> RiotVans = new List<Vehicle>(); //add when model == riot
+
+        private List<EntityData<Vehicle>> Ambulances = new List<EntityData<Vehicle>>()
+        {
+            new EntityData<Vehicle>()
+            {
+                Position = new Vector3(260.8994f, 166.494f, 104.5317f),
+                Heading = 199.5887f,
+            },
+            new EntityData<Vehicle>()
+            {
+                Position = new Vector3(239.1898f, 172.3954f, 104.8571f),
+                Heading = 158.5571f,
+            }
+        };
+
+        private List<EntityData<Ped>> Paramedics = new List<EntityData<Ped>>()
+        {
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(242.0103f, 174.1728f, 105.1191f),
+                Heading = 330.9329f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(243.9722f, 170.8235f, 105.0307f),
+                Heading = 341.8453f,
+            },
+        };
+
+        private List<EntityData<Vehicle>> Firetrucks = new List<EntityData<Vehicle>>()
+        {
+            new EntityData<Vehicle>()
+            {
+                Position = new Vector3(246.3588f, 167.8176f, 104.9527f),
+                Heading = 249.4772f,
+            },
+        };
+
+        private List<EntityData<Ped>> Hostages = new List<EntityData<Ped>>()
+        {
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(253.4743f, 217.7294f, 106.2868f),
+                Heading = 26.3351f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(240.2256f, 223.8581f, 106.2869f),
+                Heading = 333.7643f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(247.4731f, 215.7981f, 106.2869f),
+                Heading = 308.5362f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(235.0374f, 218.5802f, 110.2827f),
+                Heading =  183.8941f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(243.3186f, 210.8154f, 110.283f),
+                Heading =  69.50799f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(265.409f, 214.4903f, 110.2873f),
+                Heading =  250.7003f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(256.4999f, 225.638f, 106.2868f),
+                Heading =  344.9573f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(257.9439f, 227.4617f, 101.6833f),
+                Heading = 66.61107f,
+            },
+        };
+
+        private List<EntityData<Ped>> RescuedHostages = new List<EntityData<Ped>>();
+        private List<EntityData<Ped>> SafeHostages = new List<EntityData<Ped>>();
+
+        private List<EntityData<Ped>> RobbersNegotiation = new List<EntityData<Ped>>()
+        {
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(235.2906f, 217.1142f, 106.2867f),
+                Heading = 109.0629f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(254.4529f, 217.6757f, 106.2868f),
+                Heading = 230.5565f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(243.2524f, 222.3944f, 106.2868f),
+                Heading = 78.30953f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(257.5506f, 223.6651f, 106.2863f),
+                Heading = 139.71f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(242.9586f, 213.7329f, 110.283f),
+                Heading = 333.9886f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(261.4425f, 223.766f, 101.6833f),
+                Heading = 246.4011f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(266.9025f, 219.2729f, 104.8833f),
+                Heading = 93.847f,
+            }
+        };
+
+        private readonly List<EntityData<Ped>> SneakyRobbers = new List<EntityData<Ped>>()
+        {
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(235.5733f, 228.3068f, 110.2827f),
+                Heading = 248.8268f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(256.7757f, 205.0848f, 110.283f),
+                Heading = 339.1755f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(265.3547f, 222.4385f, 101.6833f),
+                Heading = 153.5341f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(263.0323f, 215.4664f, 110.2877f),
+                Heading = 159.1769f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(255.1933f, 222.045f, 106.2869f),
+                Heading = 341.1396f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(238.6139f, 228.2485f, 106.2834f),
+                Heading = 69.37666f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(238.6164f, 227.2258f, 110.2827f),
+                Heading = 68.82679f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(261.3226f, 210.6962f, 110.2877f),
+                Heading = 166.2358f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(265.8036f, 215.6155f, 110.283f),
+                Heading = 334.0478f,
+            },
+        };
+
+        private List<EntityData<Ped>> VaultRobbers = new List<EntityData<Ped>>()
+        {
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(253.9261f, 221.6735f, 101.6834f),
+                Heading = 353.9462f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(252.686f, 221.9205f, 101.6834f),
+                Heading = 343.3658f,
+            },
+            new EntityData<Ped>()
+            {
+                Position = new Vector3(251.4069f, 222.5131f, 101.6834f),
+                Heading = 335.4267f,
+            },
+        };
+
+        private Vector3[] PacificBankDoors = new Vector3[] { new Vector3(229.7984f, 214.4494f, 105.5554f), new Vector3(258.3625f, 200.4897f, 104.9758f) };
+        private Vector3[] PacificBankInsideChecks = new Vector3[] { new Vector3(235.9762f, 220.6012f, 106.2868f), new Vector3(238.3628f, 214.8286f, 106.2868f), new Vector3(261.084f, 208.12f, 106.2832f), new Vector3(235.2972f, 217.1385f, 106.2867f) };
+        private Vector3[] PacificBankDoorsInside = new Vector3[] { new Vector3(259.5908f, 204.1841f, 106.2832f), new Vector3(232.4167f, 215.6826f, 106.2866f) };
+
+        private Vector3 InsideBankVault = new Vector3(252.3106f, 222.5586f, 101.6834f);
+        private Vector3 OutsideBankVault = new Vector3(257.3354f, 225.5874f, 101.8757f);
     }
 }

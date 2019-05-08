@@ -1,11 +1,16 @@
-﻿using System.Collections.Generic;
+﻿// copy /Y "$(TargetDir)$(ProjectName).dll" "G:\Program Files\Rockstar Games\Grand Theft Auto V\Plugins\LSPDFR
+// copy /Y "$(TargetDir)$(ProjectName).pdb" "G:\Program Files\Rockstar Games\Grand Theft Auto V\Plugins\LSPDFR
+
+
+
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml;
 using System.IO;
 using System.Reflection;
-
+ 
 namespace AssortedCallouts
 {
 
